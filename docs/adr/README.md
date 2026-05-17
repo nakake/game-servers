@@ -44,3 +44,4 @@
 | ADR | タイトル | Status |
 |---|---|---|
 | [0001](0001-cloudflare-workers-over-lambda.md) | 制御プレーンに Cloudflare Workers を採用する | Accepted |
+| [0002](0002-mc-stop-flow-docker-ssm.md) | MC サーバーの停止フローを Docker + SSM Run Command で構成する | Accepted |

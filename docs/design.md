@@ -509,6 +509,8 @@ F:/project/game_servers/
 
 ### 7.2 停止シーケンス
 
+> **注**: 「Worker → RCON 直叩き」案は [ADR 0002](adr/0002-mc-stop-flow-docker-ssm.md) で **Docker + SSM Run Command** 構成に置き換わった。以下はその改訂版。
+
 ```
 [トリガー] 以下のいずれか:
    - Discord /stop コマンド
@@ -516,18 +518,25 @@ F:/project/game_servers/
    - Workers cron (1h ごとフォールバック)
    ▼
 [Worker]
-   1. RCON 経由で graceful stop コマンド
-      mc: /save-all → /stop
-      terraria: /exit
-   2. プロセス停止確認 (CloudWatch Logs か EC2 metric)
-   3. EBS Snapshot 作成 (tag: game=atm11, Purpose=game-world)
+   1. SSM SendCommand: `docker stop --time=60 mc`
+   2. SSM GetCommandInvocation で status=Success 待ち (max 90s)
+   3. EBS Snapshot 作成 (tag: game=<id>, Purpose=game-world)
    4. Snapshot 完了確認
    5. EC2 Terminate
    6. SERVER_STATE.current = null
    7. Discord webhook で停止通知
    ▼
+[EC2 (SSM agent) → docker]
+   docker stop --time=60 mc
+     ├─ container 内 entrypoint.sh の trap (SIGTERM)
+     │     mcrcon → save-all flush
+     │     mcrcon → stop
+     └─ java exit → container Stopped
+   ▼
 [DLM] 3 世代超過分を自動削除
 ```
+
+ゲーム別の graceful stop コマンドは container 内 `entrypoint.sh` の trap に閉じる (mc: rcon `save-all && stop`, terraria: `/exit` 等)。Worker は **常に `docker stop`** を発火するだけで、ゲーム固有のコマンドを知る必要がない。
 
 ### 7.3 障害対応
 
