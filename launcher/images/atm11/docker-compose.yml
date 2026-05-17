@@ -1,0 +1,37 @@
+# ローカル検証用 (Phase 1)
+#
+# 用途: Windows + Docker Desktop で ATM11 を Docker 上で起動し、
+#       SIGTERM trap → rcon save-all → stop の流れを確認する。
+#
+# 使い方:
+#   1. F:/Games/minecraft/ATM/ATM11 に Phase 0 で使った ATM11 一式があること
+#   2. .env を作成 (rcon パスワードなど) — env.example を参照
+#   3. docker compose up --build
+#   4. Minecraft クライアントから localhost:25565 で接続
+#   5. (別ターミナル) docker stop --time=60 atm11
+#      → entrypoint の trap → rcon save-all flush → stop → java exit
+#
+# 本番 (EC2) では Compose ではなく cloud-init から `docker run` 経由で起動する。
+
+services:
+  atm11:
+    build: .
+    image: ghcr.io/game-servers/atm11-server:26.1.2-dev
+    container_name: atm11
+    stop_grace_period: 60s
+    stop_signal: SIGTERM
+    ports:
+      - "25565:25565/tcp"
+      # RCON port (25575) は意図的に公開しない (localhost のみ)
+    volumes:
+      # ATM11_DATA_DIR を .env で上書き。Windows ローカル / EC2 で値を切り替える。
+      #   - Windows Docker Desktop: F:/Games/minecraft/ATM/ATM11 (デフォルト)
+      #   - EC2 (Amazon Linux 2023): /opt/atm11 など EBS マウント先
+      - "${ATM11_DATA_DIR:-F:/Games/minecraft/ATM/ATM11}:/data"
+    environment:
+      NEOFORGE_VERSION: "26.1.2.48-beta"
+      RCON_PORT: "25575"
+      # RCON_PASSWORD は .env で渡す (Git にコミットしない)
+      RCON_PASSWORD: "${RCON_PASSWORD:?set RCON_PASSWORD in .env}"
+      EULA: "TRUE"
+    restart: "no"
