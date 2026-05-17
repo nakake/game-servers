@@ -1,6 +1,6 @@
 # Game Servers — 設計ドキュメント
 
-最終更新: 2026-05-17
+最終更新: 2026-05-17 (rev 2: §4.6 AWS 通知の Discord 集約を追加)
 
 ## 1. 目的とスコープ
 
@@ -153,6 +153,10 @@ POST /sidecar/idle-detected
 POST /sidecar/heartbeat
   └─ 状態 KV 更新 (last_seen, player_count)
 
+POST /aws/notification
+  ├─ SNS SubscriptionConfirmation → URL 自動 GET で承認
+  └─ SNS Notification → message_type で分岐 → Discord webhook 整形送信
+
 GET /health
   └─ Worker 死活
 ```
@@ -212,6 +216,45 @@ namespace: SERVER_STATE
 - S3: `GetObject` / `PutObject` (modpack/backup)
 
 CPU 時間 < 10ms (free tier 制限) を超えないよう、AWS レスポンス待ちは wall-time のみ消費する設計 (waitUntil 内で sequential await)。
+
+### 4.6 AWS 通知の Discord 集約
+
+AWS からの各種アラートを **メールではなく Discord チャンネルに集約**する。
+
+```
+[AWS Budgets / EventBridge / CloudWatch Alarm]
+   │  発火イベント
+   ▼
+[SNS Topic: gs-alerts]
+   │  HTTPS subscription
+   ▼
+[Cloudflare Worker /aws/notification]
+   ├─ x-amz-sns-message-type ヘッダで分岐
+   │    SubscriptionConfirmation → SubscribeURL を GET して自動承認
+   │    Notification          → 本処理
+   ├─ Subject / Message を Discord 用に整形
+   │    重要度に応じて embed の color 変更 (赤=critical, 黄=warning, 緑=info)
+   └─ Discord channel webhook へ POST
+```
+
+#### 通知種別と発火元
+
+| 種別 | 発火元 | 重要度 |
+|---|---|---|
+| Budget アラート (¥3000 到達) | AWS Budgets → SNS | warning |
+| Spot 中断警告 | EventBridge `EC2 Spot Instance Interruption Warning` → SNS | critical |
+| EC2 起動失敗 | Worker 内で検出 → Discord 直接 | warning |
+| DLM snapshot 失敗 | EventBridge `DLM Policy State Change` → SNS | warning |
+| IAM ログイン異常 | CloudTrail → EventBridge → SNS | critical |
+| 週次バックアップ完了 | Lambda → SNS (or Worker 直接) | info |
+
+#### 設計判断
+
+- **SNS を経由する理由**: AWS 側の通知元 (Budgets / EventBridge / Alarm) は HTTPS 直接配信ではなく SNS 経由が標準。複数の通知元を Worker 1 エンドポイントに集約できる。
+- **SubscriptionConfirmation の自動承認**: 初回 subscribe 時に SNS は「URL を GET して確認」を要求する。Worker 側で自動 GET することで手動承認を省略。
+- **メール完全廃止しない**: ルートユーザー絡みの AWS からの正式通知 (規約変更、ルートログイン異常) はメール必須なので残す。日常運用通知だけ Discord 化。
+
+詳細実装は Phase 1 (Worker エンドポイント) と Phase 4 (SNS topic + EventBridge ルール) の 2 段階で構築する。
 
 ---
 
@@ -332,7 +375,9 @@ F:/project/game_servers/
 │  │  │  │  ├─ stop.ts
 │  │  │  │  ├─ status.ts
 │  │  │  │  ├─ list.ts
-│  │  │  │  └─ backup.ts
+│  │  │  │  ├─ backup.ts
+│  │  │  │  ├─ sidecar-idle.ts
+│  │  │  │  └─ aws-notification.ts    # SNS → Discord 通知集約
 │  │  │  └─ lib/
 │  │  │     ├─ discord.ts        # 署名検証、レスポンス生成
 │  │  │     ├─ aws.ts            # aws4fetch ラッパ
@@ -524,7 +569,8 @@ F:/project/game_servers/
 
 ### 8.3 上限ガード
 
-- AWS Budgets でアラート 2 段階 (¥2000 / ¥3000)
+- AWS Budgets でアラート 2 段階 ($15 / $20 ≒ ¥2,250 / ¥3,000)
+- 通知は **SNS → Worker → Discord** 経由 (詳細 §4.6)。Phase 0〜初期は メール直送、Phase 1 で Discord 化
 - EC2 Fleet の max_spot_price を JPY 換算で設定 (registry 値を Terraform に注入)
 
 ---
@@ -562,8 +608,10 @@ F:/project/game_servers/
 - [ ] Worker で `/ping` 応答
 - [ ] Worker から手動 EC2 起動 / 停止 (`/start atm11` ハードコード)
 - [ ] Cloudflare DNS API で A レコード更新
+- [ ] Worker `/aws/notification` 実装 (SNS subscription confirm + Discord 整形)
+- [ ] 手動で SNS topic 作成 → Budget アラートを Discord に切替
 
-ゴール: Discord から ATM11 を上げ下げできる
+ゴール: Discord から ATM11 を上げ下げできる、Budget 通知も Discord に届く
 
 ### Phase 2: ゲーム抽象化 (2 日)
 
@@ -582,14 +630,18 @@ F:/project/game_servers/
 
 ゴール: 放置で勝手に停止する
 
-### Phase 4: IaC 化 (3〜5 日)
+### Phase 4: IaC 化 + 通知拡張 (3〜5 日)
 
 - [ ] Terraform で AWS リソース全部記述
 - [ ] Packer で AMI ビルド
 - [ ] GitHub Actions で worker / AMI / terraform CI
 - [ ] runbook.md 整備
+- [ ] SNS topic `gs-alerts` を Terraform 化、Worker URL に subscribe
+- [ ] EventBridge ルール追加 (Spot 中断警告, DLM 失敗) → SNS → Discord
+- [ ] CloudTrail → EventBridge で IAM ログイン異常検知 → Discord
+- [ ] 週次バックアップ完了通知 (info レベル)
 
-ゴール: 完全コード化、災害復旧 1 時間以内
+ゴール: 完全コード化、災害復旧 1 時間以内、AWS 通知が Discord に集約
 
 ### Phase 5 (任意): OIDC 化、Terraria 追加など
 
