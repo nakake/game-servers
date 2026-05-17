@@ -1,0 +1,64 @@
+{
+  "game_id": "REPLACE_ME_game_id",
+  "display_name": "REPLACE_ME Display Name",
+  "category": "minecraft-vanilla",
+  "enabled": false,
+
+  "instance_types": [
+    "t4g.medium"
+  ],
+  "ebs_size_gb": 10,
+  "spot_max_price_jpy_per_hour": 10,
+
+  "subdomain": "REPLACE_ME_subdomain",
+  "cf_record_id": "TBD_AFTER_REGISTRATION",
+  "ports": [
+    { "port": 25565, "proto": "TCP" }
+  ],
+
+  "container_image": "itzg/minecraft-server:java21",
+  "env": {
+    "EULA": "TRUE",
+    "TYPE": "VANILLA",
+    "VERSION": "LATEST",
+    "MEMORY": "3G",
+    "MOTD": "REPLACE_ME server",
+    "MAX_PLAYERS": "10",
+    "VIEW_DISTANCE": "10",
+    "SIMULATION_DISTANCE": "8",
+    "ENABLE_RCON": "true",
+    "RCON_PORT": "25575",
+    "RCON_PASSWORD_FROM_SSM": "/gs/REPLACE_ME_game_id/rcon_password"
+  },
+
+  "config_s3_prefix": "s3://gs-game-configs/REPLACE_ME_game_id/",
+
+  "idle_check": {
+    "type": "minecraft_rcon",
+    "timeout_min": 10,
+    "heartbeat_interval_sec": 60,
+    "config": {
+      "host": "localhost",
+      "port": 25575,
+      "password_source": "ssm:/gs/REPLACE_ME_game_id/rcon_password",
+      "command": "list",
+      "empty_pattern": "There are 0 of a max"
+    }
+  },
+
+  "snapshot": {
+    "generations": 3,
+    "weekly_s3_backup": true,
+    "tags": {
+      "Project": "game-servers",
+      "Game": "REPLACE_ME_game_id",
+      "Purpose": "game-world"
+    }
+  },
+
+  "discord": {
+    "start_message": "REPLACE_ME を起動中...",
+    "ready_message": "REPLACE_ME 起動完了! `REPLACE_ME_subdomain.example.com:25565` で接続できます",
+    "stop_message": "REPLACE_ME を停止しました"
+  }
+}
