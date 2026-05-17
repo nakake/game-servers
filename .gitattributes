@@ -1,0 +1,79 @@
+# Default: detect text vs binary, normalize line endings to LF on commit/checkout
+* text=auto eol=lf
+
+# ============================================================
+# Windows-only scripts: keep CRLF
+# ============================================================
+*.bat       text eol=crlf
+*.cmd       text eol=crlf
+*.ps1       text eol=crlf
+
+# ============================================================
+# Shell scripts: enforce LF (executed on Linux)
+# ============================================================
+*.sh        text eol=lf
+*.bash      text eol=lf
+
+# ============================================================
+# Source code (explicit for safety)
+# ============================================================
+*.ts        text eol=lf
+*.tsx       text eol=lf
+*.js        text eol=lf
+*.mjs       text eol=lf
+*.cjs       text eol=lf
+*.json      text eol=lf
+*.jsonc     text eol=lf
+*.yaml      text eol=lf
+*.yml       text eol=lf
+*.toml      text eol=lf
+*.tf        text eol=lf
+*.tfvars    text eol=lf
+*.hcl       text eol=lf
+*.pkr.hcl   text eol=lf
+
+# ============================================================
+# Docs / config
+# ============================================================
+*.md            text eol=lf
+*.txt           text eol=lf
+*.properties    text eol=lf
+*.conf          text eol=lf
+.editorconfig   text eol=lf
+.gitignore      text eol=lf
+.gitattributes  text eol=lf
+
+# ============================================================
+# Game config files
+# ============================================================
+*.bak           text eol=lf
+
+# ============================================================
+# Binary (no diff, no eol conversion)
+# ============================================================
+*.png       binary
+*.jpg       binary
+*.jpeg      binary
+*.gif       binary
+*.webp      binary
+*.ico       binary
+*.pdf       binary
+*.zip       binary
+*.tar       binary
+*.tar.gz    binary
+*.tgz       binary
+*.tar.zst   binary
+*.zst       binary
+*.7z        binary
+*.jar       binary
+*.box       binary
+*.pem       binary
+*.p12       binary
+*.pfx       binary
+*.key       binary
+
+# ============================================================
+# GitHub linguist hints (リポジトリ言語判定の調整)
+# ============================================================
+docs/**          linguist-documentation
+games/**/config/** linguist-vendored
