@@ -44,6 +44,13 @@ export interface Env {
   ATM11_SNAPSHOT_ID: string;
   // registry.json の cf_record_id を override (TBD_AFTER_REGISTRATION の代わり)
   ATM11_CF_RECORD_ID: string;
+  // SSM Parameter Store path for RCON password (例: /gs/atm11/rcon_password)
+  ATM11_RCON_PASSWORD_SSM_PATH: string;
+
+  // ---- launcher 配布 (Phase 1) ----
+  // EC2 user-data が aws s3 cp で取得する tarball の S3 URI
+  // (例: s3://gs-game-configs/launcher/atm11.tar.gz)
+  LAUNCHER_TARBALL_S3_URI: string;
 
   // ---- SNS → Discord 集約 (design.md §4.6) ----
   // 受け付ける SNS Topic ARN。allow list として使う。未設定なら全許可 (本番では必須)。

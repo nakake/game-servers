@@ -18,6 +18,7 @@ import {
   InteractionResponseType,
   type Interaction,
 } from '../../lib/discord/types.js';
+import { base64EncodeUserData, buildAtm11UserData } from '../../lib/launcher/user-data.js';
 import { getGameById } from '../../lib/registry/atm11.js';
 import type { Env } from '../../env.js';
 
@@ -101,7 +102,18 @@ async function executeStart(gameId: string, interaction: Interaction, env: Env):
       : `env seed \`${snapshotId}\``;
     await safeEdit(followUp, `⏳ snapshot 確定: ${snapshotNote}、EC2 起動中…`);
 
-    // 3. RunInstances (Spot, snapshot から root とは別 EBS を attach)
+    // 3. user-data 生成 (EBS mount → S3 から launcher tarball → SSM から RCON pw → docker build/run)
+    const awsRegion = env.AWS_REGION ?? 'ap-northeast-1';
+    const userData = base64EncodeUserData(
+      buildAtm11UserData({
+        game,
+        launcherTarballS3Uri: env.LAUNCHER_TARBALL_S3_URI,
+        rconPasswordSsmPath: env.ATM11_RCON_PASSWORD_SSM_PATH,
+        awsRegion,
+      }),
+    );
+
+    // 4. RunInstances (Spot, snapshot から root とは別 EBS を attach)
     const primaryInstanceType = game.instance_types[0] ?? 'r7a.large';
     const result = await runInstances(ec2, {
       imageId: env.EC2_IMAGE_ID,
@@ -110,6 +122,7 @@ async function executeStart(gameId: string, interaction: Interaction, env: Env):
       securityGroupIds: [env.EC2_SECURITY_GROUP_ID],
       subnetId: env.EC2_SUBNET_ID,
       iamInstanceProfileName: env.EC2_INSTANCE_PROFILE_NAME,
+      userData,
       spot: true,
       instanceTags: {
         Project: 'game-servers',
@@ -172,7 +185,7 @@ async function executeStart(gameId: string, interaction: Interaction, env: Env):
       followUp,
       `✅ ${game.discord.ready_message}\n` +
         `\`${fqdn}:${port}\` (IP: \`${inst.publicIp}\`, instanceId: \`${instanceId}\`)\n` +
-        `※ Phase 1 hardcode: docker container は SSH で手動起動が必要です`,
+        `※ container の起動に追加 1-2 分かかります (image build)`,
     );
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);

@@ -219,6 +219,37 @@ docker rm nginx
 
 ## Step 5: ATM11 を EC2 で動かす
 
+> **Note (2026-05-17 更新)**: docker container 起動は Worker `/start atm11` の user-data で自動化済 (commit 7d791b6 以降)。本番接続後はこの Step 5 を踏まずに `/start atm11` を Discord から叩けば EBS attach + launcher 取得 + docker build/run が完結する。以下は graceful stop 検証時の手動経路として残してある。本番接続前に必要な前準備は **Step 5.0** を参照。
+
+### 5.0 user-data 自動化の前準備 (Worker /start を本番接続後に動かすため)
+
+EC2 IAM role (`gs-phase0-ec2-role`) は `AmazonS3ReadOnlyAccess` + `AmazonSSMManagedInstanceCore` を持つ前提。両方を持っていれば追加権限は不要。
+
+**SSM Parameter Store に RCON password を投入**:
+
+```powershell
+$pw = -join ((48..57) + (65..90) + (97..122) | Get-Random -Count 24 | ForEach-Object { [char]$_ })
+aws ssm put-parameter `
+  --name /gs/atm11/rcon_password `
+  --value $pw `
+  --type SecureString `
+  --region ap-northeast-1
+# 値は Worker 側で動的に取得するためメモは不要
+```
+
+**S3 bucket 作成 + launcher tarball upload**:
+
+```powershell
+aws s3 mb s3://gs-game-configs --region ap-northeast-1
+# bucket policy は default (private) のまま、EC2 IAM が AmazonS3ReadOnlyAccess を持っているので EC2 内から GetObject 可
+
+cd F:\project\game_servers
+.\scripts\sync-launcher-to-s3.ps1 -GameId atm11
+# → s3://gs-game-configs/launcher/atm11.tar.gz にアップロード
+```
+
+これで Worker `/start atm11` が S3 から launcher を取得し、SSM から RCON password を取って docker container を立ち上げる経路が成立する。
+
 ### 5.1 ATM11 ディレクトリを EC2 に転送
 
 **選択 A: Phase 0 の EBS snapshot が残っていれば復元**
@@ -382,12 +413,14 @@ AWS Console で:
 
 ## Phase 1 着地後の次タスク
 
-このフルパスが通れば、Phase 1 の停止経路は完成。次は:
+このフルパスが通り、コードベースが揃った時点での残作業:
 
-- [ ] `lib/aws/ec2.ts` (EC2 RunInstances / DescribeInstances / TerminateInstances)
-- [ ] `lib/aws/ebs.ts` (CreateSnapshot)
-- [ ] Discord interaction endpoint (ed25519 検証 + PING/PONG)
-- [ ] `/start atm11` ハードコード版で EC2 起動 → DNS 更新 → 完了通知
-- [ ] `/aws/notification` (SNS → Discord) + Budget alert 切替
+- [x] `lib/aws/ec2.ts` (RunInstances / DescribeInstances / TerminateInstances / `describeInstancesByTag`)
+- [x] `lib/aws/ebs.ts` (CreateSnapshot / DescribeSnapshots / `getLatestCompletedSnapshot`)
+- [x] Discord interaction endpoint (ed25519 検証 + PING/PONG + Application Command dispatch)
+- [x] `/start /stop /list /status` + EBS snapshot 世代管理
+- [x] `/aws/notification` (SNS → Discord)
+- [x] EC2 user-data で docker run まで自動化 (Step 5.0 前準備の上で動作)
+- [ ] **本番接続フェーズ**: Cloudflare アカウント / Worker デプロイ / Discord アプリ登録 / slash command 登録 / SNS topic 作成 / Budget alert 切替 / 全コマンド実弾検証 (別 runbook 予定)
 
 `/admin/docker-stop` は Phase 2 で Discord 経由 `/stop` に置き換わったら削除する。
