@@ -21,6 +21,9 @@
 .wrangler/
 wrangler.toml.local
 
+# Phase 1 検証用の throwaway 秘密鍵 (Discord 署名検証テスト)
+.discord-test-keypair.json
+
 # ============================================================
 # Node.js / pnpm
 # ============================================================

@@ -1,0 +1,34 @@
+# Cloudflare Worker — Discord interaction handler
+#
+# 本番デプロイは `pnpm deploy` (要 Cloudflare アカウント + wrangler login)。
+# ローカル開発は `pnpm dev` で http://localhost:8787 を listen。
+
+name = "discord-handler"
+main = "src/index.ts"
+compatibility_date = "2026-05-01"
+compatibility_flags = ["nodejs_compat"]
+
+# 本番ログを Cloudflare dashboard で見るために有効化 (Workers Logs)。
+[observability]
+enabled = true
+
+# ---- 今は使わない (Phase 1 後半で実体作成して uncomment) ----
+#
+# [[kv_namespaces]]
+# binding = "GAME_REGISTRY"
+# id = "TBD"           # `wrangler kv namespace create GAME_REGISTRY` で発行された ID
+#
+# [[kv_namespaces]]
+# binding = "SERVER_STATE"
+# id = "TBD"
+#
+# [triggers]
+# crons = ["0 * * * *"]  # 1時間ごとに idle フォールバック (Phase 3)
+#
+# シークレットは wrangler secret put NAME で投入する (このファイルには書かない):
+#   - DISCORD_PUBLIC_KEY      ed25519 verification
+#   - DISCORD_BOT_TOKEN       (interaction follow-up message 用)
+#   - AWS_ACCESS_KEY_ID
+#   - AWS_SECRET_ACCESS_KEY
+#   - CLOUDFLARE_DNS_API_TOKEN
+#   - SIDECAR_HMAC_SECRET

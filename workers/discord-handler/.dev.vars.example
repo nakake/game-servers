@@ -1,0 +1,41 @@
+# Wrangler ローカル開発用シークレット。
+# このファイルを `.dev.vars` にコピーして実値を入れる。`.dev.vars` は .gitignore 済み。
+# 本番は `pnpm wrangler secret put NAME` で Cloudflare 側に投入する。
+
+# ---- Phase 1 検証専用 (Phase 2 で削除) ----
+# /admin/* endpoint の Bearer 認証トークン。ローカル開発の固有値を入れる。
+ADMIN_API_KEY=local-dev-changeme
+
+# ---- AWS IAM Access Key (Phase 1: IAM ユーザー gs-worker-caller) ----
+# runbook-phase1.md の Step 1 で作成。
+AWS_ACCESS_KEY_ID=AKIA...
+AWS_SECRET_ACCESS_KEY=...
+AWS_REGION=ap-northeast-1
+
+# ---- Discord ----
+# Discord Developer Portal → Application → General Information → Public Key (hex 64文字)
+# ローカル検証時はテスト用 ed25519 鍵ペアの公開鍵を入れる
+DISCORD_PUBLIC_KEY=
+# Application ID (Developer Portal の General Information → Application ID)
+DISCORD_APPLICATION_ID=
+
+# ---- Cloudflare DNS ----
+# Zone:DNS:Edit 権限のみの API Token を Cloudflare dashboard で発行
+# https://dash.cloudflare.com/profile/api-tokens
+CLOUDFLARE_DNS_API_TOKEN=
+# 対象 zone の ID (Cloudflare dashboard で zone を開いた時の右下)
+CLOUDFLARE_ZONE_ID=
+# FQDN 組み立てに使うベースドメイン (例: example.com → atm11.example.com)
+CLOUDFLARE_BASE_DOMAIN=example.com
+
+# ---- EC2 起動パラメータ (Phase 1 hardcode、Phase 2 で Terraform output 経由に) ----
+EC2_SUBNET_ID=subnet-xxxxxxxx
+EC2_SECURITY_GROUP_ID=sg-xxxxxxxx
+EC2_KEY_NAME=gs-phase0-key
+EC2_IMAGE_ID=resolve:ssm:/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64
+EC2_INSTANCE_PROFILE_NAME=gs-phase0-ec2-role
+
+# ---- ATM11 固有 (Phase 1 hardcode) ----
+ATM11_SNAPSHOT_ID=snap-xxxxxxxx
+# Cloudflare DNS A レコード ID (事前に dashboard で atm11.<base-domain> を作成して取得)
+ATM11_CF_RECORD_ID=

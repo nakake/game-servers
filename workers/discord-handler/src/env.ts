@@ -1,0 +1,51 @@
+// Worker の environment binding 型定義。
+//
+// wrangler.toml の [[kv_namespaces]] / [vars] / `wrangler secret put` で投入された値が
+// fetch ハンドラの env 引数として渡る。ここで型を一元定義する。
+
+export interface Env {
+  // ---- Phase 1 検証用 (Phase 2 で削除予定) ----
+  // /admin/* endpoint の Bearer 認証
+  ADMIN_API_KEY: string;
+
+  // ---- AWS (IAM Access Key, Phase 2 で OIDC に移行) ----
+  AWS_ACCESS_KEY_ID: string;
+  AWS_SECRET_ACCESS_KEY: string;
+  // optional: 省略時は ap-northeast-1
+  AWS_REGION?: string;
+
+  // ---- Discord ----
+  // Discord Developer Portal の Application → General Information → Public Key (hex)。
+  // /discord/interaction の ed25519 検証に必須。
+  DISCORD_PUBLIC_KEY: string;
+  // Application ID (Developer Portal の General Information → Application ID)。
+  // follow-up message API のエンドポイント組み立てに使う (Bot Token は不要、token で十分)。
+  DISCORD_APPLICATION_ID: string;
+
+  // ---- Cloudflare DNS ----
+  // Zone:DNS:Edit 権限のみの API Token (Phase 1)。Phase 2 で OIDC 検討。
+  CLOUDFLARE_DNS_API_TOKEN: string;
+  // 対象 zone の ID (Cloudflare dashboard で zone を開いた時の右下に表示)
+  CLOUDFLARE_ZONE_ID: string;
+  // FQDN 組み立てに使う (例: "example.com"、subdomain="atm11" → atm11.example.com)
+  CLOUDFLARE_BASE_DOMAIN: string;
+
+  // ---- EC2 起動パラメータ (Phase 1 hardcode、Phase 2 で Terraform output から KV へ) ----
+  EC2_SUBNET_ID: string;
+  EC2_SECURITY_GROUP_ID: string;
+  EC2_KEY_NAME: string;
+  // resolve:ssm:/aws/service/... 形式も可
+  EC2_IMAGE_ID: string;
+  // IAM Instance Profile (AmazonSSMManagedInstanceCore + その他 attach 済み)
+  EC2_INSTANCE_PROFILE_NAME: string;
+
+  // ---- ATM11 固有 (Phase 1 hardcode、Phase 2 で registry/KV へ移す) ----
+  // Phase 0 で取った snapshot を再利用する EBS volume の元
+  ATM11_SNAPSHOT_ID: string;
+  // registry.json の cf_record_id を override (TBD_AFTER_REGISTRATION の代わり)
+  ATM11_CF_RECORD_ID: string;
+
+  // ---- KV bindings (Phase 1 後半で wrangler.toml に追加した時に揃える) ----
+  // GAME_REGISTRY: KVNamespace;
+  // SERVER_STATE: KVNamespace;
+}
