@@ -5,12 +5,12 @@
   "enabled": true,
 
   "instance_types": [
-    "m7a.xlarge",
-    "m7i.xlarge",
-    "m6a.xlarge"
+    "r7a.large",
+    "r6a.large",
+    "m7a.xlarge"
   ],
   "ebs_size_gb": 30,
-  "spot_max_price_jpy_per_hour": 30,
+  "spot_max_price_jpy_per_hour": 12,
 
   "subdomain": "atm11",
   "cf_record_id": "TBD_AFTER_REGISTRATION",

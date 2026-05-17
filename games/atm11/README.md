@@ -9,14 +9,44 @@
 
 ## 性能設計値
 
-| 項目 | 値 |
+Phase 0 検証 (2026-05-17, m7a.xlarge 実測) に基づく確定値:
+
+| 項目 | 値 | 根拠 |
+|---|---|---|
+| JVM Heap (Xms/Xmx) | **10 GB 固定** | RSS 実測 11.06 GB、ZGC 推奨ヒープサイズ |
+| GC | **Generational ZGC** | Java 23+ デフォルト、Allocation stall 無し確認 |
+| 起動時間 | **44 秒** | ModernFix 計測値 |
+| TPS (1 人プレイ) | **20.0** | 完璧 |
+| mspt 中央値 | **5.0 ms** | 目標 50ms の 1/10 |
+| CPU 使用率 | **3 %** | m7a.xlarge では完全に過剰 |
+| 実 RAM 消費 | **11 GB** | OS + Docker 合わせて 14 GB 弱 |
+
+## インスタンス選定
+
+`instance_types` (EC2 Fleet 優先順):
+
+| 順位 | インスタンス | vCPU | RAM | spot 単価目安 | 月50h | 採用理由 |
+|---|---|---|---|---|---|---|
+| **1** | **r7a.large** | **2** | **16 GB** | **¥6/h** | **¥300/月** | **CPU 余り、RAM 必要、AMD 最新世代で最安** |
+| 2 | r6a.large | 2 | 16 GB | ¥5/h | ¥250/月 | Graviton 不可 (Java 25 / mod 互換懸念のため AMD)、旧世代 fallback |
+| 3 | m7a.xlarge | 4 | 16 GB | ¥9/h | ¥450/月 | Phase 0 で実績あり、spot 中断時の最終 fallback |
+
+> **r7a.large に絞った理由**: Phase 0 で m7a.xlarge の CPU 使用率がわずか **3%** だった。
+> 4 vCPU は完全にオーバースペック。vCPU 半減・単価 -33% でも問題なく動く想定。
+> 3〜4 人プレイ + mob 農場稼働でも CPU 余裕は十分残る計算。
+
+### 除外したインスタンス
+
+| インスタンス | 除外理由 |
 |---|---|
-| JVM Heap (Xms/Xmx) | 10 GB (固定) |
-| GC | Generational ZGC (Java 23+ デフォルト) |
-| インスタンス第一候補 | m7a.xlarge (4 vCPU / 16 GB) |
-| 想定実 RAM 消費 | 12〜14 GB |
-| 想定 mspt | < 50ms (1〜3 人) |
-| 想定起動時間 | 40〜60 秒 |
+| t4g.* / t3.* | バースト型 = 長時間安定稼働に不向き |
+| m7a.large | RAM 8GB で Xmx 10G + ZGC オーバーヘッドに不足 |
+| r7g.large | Graviton (ARM) — mod 一部に native lib 互換性懸念 |
+| c7a.large | RAM 4GB で論外 |
+
+### スポット価格上限
+
+`spot_max_price_jpy_per_hour: 12` — r7a.large の通常 spot 単価の 2 倍を上限に設定。スパイク時の極端な高騰を防ぎつつ、稀な高値帯でも起動可能なバランス。
 
 ## 入っている主な性能 mod
 
