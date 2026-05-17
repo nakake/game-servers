@@ -1,0 +1,4 @@
+packages:
+  - "workers/*"
+  - "workers/shared/*"
+  - "launcher/sidecar"

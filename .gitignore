@@ -1,0 +1,121 @@
+# ============================================================
+# 機密情報 (絶対にコミットしない)
+# ============================================================
+.secrets/
+*.pem
+*.key
+*.p12
+*.pfx
+.env
+.env.*
+!.env.example
+.dev.vars
+.dev.vars.*
+!.dev.vars.example
+
+# AWS
+.aws/credentials
+.aws/config
+
+# Cloudflare Workers ローカル
+.wrangler/
+wrangler.toml.local
+
+# ============================================================
+# Node.js / pnpm
+# ============================================================
+node_modules/
+.pnpm-store/
+.pnpm-debug.log*
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# ビルド成果物
+dist/
+build/
+out/
+.turbo/
+.cache/
+*.tsbuildinfo
+
+# ============================================================
+# TypeScript / JS
+# ============================================================
+*.js.map
+*.d.ts.map
+coverage/
+.nyc_output/
+
+# ============================================================
+# Terraform
+# ============================================================
+.terraform/
+.terraform.lock.hcl
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example
+crash.log
+crash.*.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+.terraformrc
+terraform.rc
+
+# ============================================================
+# Packer
+# ============================================================
+packer_cache/
+*.box
+manifest.json
+crash.log
+
+# ============================================================
+# エディタ / OS
+# ============================================================
+.idea/
+.vscode/
+!.vscode/extensions.json
+!.vscode/settings.shared.json
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# ============================================================
+# ログ / 一時ファイル
+# ============================================================
+*.log
+logs/
+tmp/
+temp/
+.tmp/
+
+# ============================================================
+# ゲームデータ (リポジトリで管理しない)
+# ============================================================
+# world/ や save/ は EBS snapshot で管理する
+games/*/world/
+games/*/saves/
+games/*/world_backup/
+
+# ローカル検証用にダウンロードしたmodpack
+games/*/modpack-cache/
+*.tar.zst
+*.tar.gz
+!games/_template/**/*.tar.gz.example
+
+# Phase 0 検証で生成される計測結果
+docs/phase0-results.md
+
+# ============================================================
+# その他
+# ============================================================
+.history/
+.task-master-ai/

@@ -1,0 +1,73 @@
+{
+  "game_id": "atm11",
+  "display_name": "All The Mods 11",
+  "category": "minecraft-modded",
+  "enabled": true,
+
+  "instance_types": [
+    "m7a.xlarge",
+    "m7i.xlarge",
+    "m6a.xlarge"
+  ],
+  "ebs_size_gb": 30,
+  "spot_max_price_jpy_per_hour": 30,
+
+  "subdomain": "atm11",
+  "cf_record_id": "TBD_AFTER_REGISTRATION",
+  "ports": [
+    { "port": 25565, "proto": "TCP" }
+  ],
+
+  "container_image": "ghcr.io/game-servers/atm11-server:26.1.2",
+  "container_image_note": "itzg/minecraft-server に java25 タグが揃うまでは自前ビルド。Dockerfile は launcher/images/atm11/ 配下。",
+  "env": {
+    "EULA": "TRUE",
+    "TYPE": "NEOFORGE",
+    "VERSION": "26.1.2",
+    "NEOFORGE_VERSION": "26.1.2.48-beta",
+    "MEMORY": "",
+    "USE_AIKAR_FLAGS": "false",
+    "JVM_XX_OPTS": "-Xms10G -Xmx10G -XX:+UseZGC -XX:+AlwaysPreTouch -XX:+DisableExplicitGC -XX:-OmitStackTraceInFastThrow -XX:+UnlockExperimentalVMOptions",
+    "OVERRIDE_SERVER_PROPERTIES": "true",
+    "VIEW_DISTANCE": "8",
+    "SIMULATION_DISTANCE": "5",
+    "DIFFICULTY": "easy",
+    "MAX_PLAYERS": "20",
+    "MOTD": "All the Mods 11",
+    "PAUSE_WHEN_EMPTY_SECONDS": "60",
+    "ENABLE_RCON": "true",
+    "RCON_PORT": "25575",
+    "RCON_PASSWORD_FROM_SSM": "/gs/atm11/rcon_password"
+  },
+
+  "config_s3_prefix": "s3://gs-game-configs/atm11/",
+
+  "idle_check": {
+    "type": "minecraft_rcon",
+    "timeout_min": 10,
+    "heartbeat_interval_sec": 60,
+    "config": {
+      "host": "localhost",
+      "port": 25575,
+      "password_source": "ssm:/gs/atm11/rcon_password",
+      "command": "list",
+      "empty_pattern": "There are 0 of a max"
+    }
+  },
+
+  "snapshot": {
+    "generations": 3,
+    "weekly_s3_backup": true,
+    "tags": {
+      "Project": "game-servers",
+      "Game": "atm11",
+      "Purpose": "game-world"
+    }
+  },
+
+  "discord": {
+    "start_message": "ATM11 を起動中...初回ロードは40〜60秒かかります",
+    "ready_message": "ATM11 起動完了! `atm11.example.com:25565` で接続できます",
+    "stop_message": "ATM11 を停止しました。次回起動まで世界は保存されています"
+  }
+}

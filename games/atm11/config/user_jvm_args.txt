@@ -1,0 +1,11 @@
+# JVM args for ATM11 (NeoForge / Java 25)
+# Switched from Aikar's G1GC flags to Generational ZGC.
+# Backup of previous settings: user_jvm_args.txt.bak
+
+-Xms10G
+-Xmx10G
+-XX:+UseZGC
+-XX:+AlwaysPreTouch
+-XX:+DisableExplicitGC
+-XX:-OmitStackTraceInFastThrow
+-XX:+UnlockExperimentalVMOptions
