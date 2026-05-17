@@ -4,6 +4,7 @@
 // Phase 1 後半で /discord/interaction, /aws/notification を追加する。
 
 import { handleAdminDockerStop } from './handlers/admin.js';
+import { handleAwsNotification } from './handlers/aws-notification.js';
 import { handleDiscordInteraction } from './handlers/discord.js';
 import type { Env } from './env.js';
 
@@ -30,6 +31,10 @@ export default {
 
     if (request.method === 'POST' && url.pathname === '/discord/interaction') {
       return handleDiscordInteraction(request, env, ctx);
+    }
+
+    if (request.method === 'POST' && url.pathname === '/aws/notification') {
+      return handleAwsNotification(request, env);
     }
 
     if (request.method === 'POST' && url.pathname === '/admin/docker-stop') {

@@ -45,6 +45,13 @@ export interface Env {
   // registry.json の cf_record_id を override (TBD_AFTER_REGISTRATION の代わり)
   ATM11_CF_RECORD_ID: string;
 
+  // ---- SNS → Discord 集約 (design.md §4.6) ----
+  // 受け付ける SNS Topic ARN。allow list として使う。未設定なら全許可 (本番では必須)。
+  SNS_ALLOWED_TOPIC_ARN?: string;
+  // 通知を投稿する Discord channel webhook URL
+  // Discord channel 設定 → Integrations → Webhooks で発行
+  DISCORD_WEBHOOK_URL?: string;
+
   // ---- KV bindings (Phase 1 後半で wrangler.toml に追加した時に揃える) ----
   // GAME_REGISTRY: KVNamespace;
   // SERVER_STATE: KVNamespace;

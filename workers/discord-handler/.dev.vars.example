@@ -39,3 +39,10 @@ EC2_INSTANCE_PROFILE_NAME=gs-phase0-ec2-role
 ATM11_SNAPSHOT_ID=snap-xxxxxxxx
 # Cloudflare DNS A レコード ID (事前に dashboard で atm11.<base-domain> を作成して取得)
 ATM11_CF_RECORD_ID=
+
+# ---- SNS → Discord 集約 (design.md §4.6) ----
+# 受け付ける SNS Topic ARN。空なら全許可 (本番では必ず設定)
+SNS_ALLOWED_TOPIC_ARN=arn:aws:sns:ap-northeast-1:111111111111:gs-alerts
+# 通知投稿先の Discord channel webhook
+# (Discord channel 設定 → Integrations → Webhooks で発行)
+DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/.../...
