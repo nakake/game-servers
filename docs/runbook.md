@@ -1,6 +1,6 @@
 # Runbook — Phase 0 検証手順
 
-最終更新: 2026-05-17
+最終更新: 2026-05-17 (rev 2: Phase 0 トラブル履歴を反映)
 
 ## このドキュメントについて
 
@@ -395,11 +395,35 @@ bash startserver.sh
 
 ## トラブルシュート
 
-### ssh: connection refused
+### Launch Template 作成時に "fail to request credential"
 
-- Security Group の inbound に自宅 IP が入っているか
+新規アカウント直後の伝搬遅延で AMI カタログ取得に失敗するケース。
+AMI 欄に SSM パラメータの **直接参照** を入力して回避:
+
+```
+resolve:ssm:/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64
+```
+
+(Phase 0 で実際に発生。トラブル #1)
+
+### Launch instance 直後に SSH connection timed out
+
+確認画面で **default SG が紛れ込み**、`gs-phase0-sg` が外れている可能性あり (Phase 0 トラブル #2 で実際に発生)。
+
+確認・修正:
+
+1. EC2 → 該当インスタンス → Security タブで attach されている SG を確認
+2. `gs-phase0-sg` 以外があれば: **Actions → Security → Change security groups** で `gs-phase0-sg` のみに置換
+3. Launch Template から起動する際は **Network settings 確認画面で SG リストを必ず目視**
+
+Phase 4 で Terraform 化する際に Network Interface 厳格指定で再発防止。
+
+### ssh: connection refused / timed out
+
+- Security Group の inbound に **現在の** 自宅 IP が入っているか
 - インスタンス state が `running` か (`Status check 2/2 passed` を待つ)
 - 自宅 IP が変わってないか (`https://checkip.amazonaws.com/`)
+- 上記 Launch Template の SG 取り違えではないか
 
 ### startserver.sh で Java not found
 
@@ -438,6 +462,21 @@ bash startserver.sh
 
 - view-distance / simulation-distance が 8 / 5 になっているか
 - spark profiler で何処にCPU使ってるか確認
+
+### `stop` を送ってもサーバーが再起動する / umount が target busy
+
+ATM11 同梱の `startserver.sh` は MC プロセス終了後に再起動するラッパループ構造になっている。
+tmux に `stop` を送っても MC が落ちた瞬間に `startserver.sh` が次のループで再起動する (Phase 0 トラブル #4)。
+
+対処: tmux session ごと kill:
+
+```bash
+tmux kill-session -t mc
+```
+
+これで startserver.sh と java が SIGHUP で停止する。`umount /opt/atm11` が target busy になる場合も大抵これが原因。
+
+注意: SSH 経由で `pkill -f "java"` を呼ぶ場合、コマンド文字列に "java" が含まれていると shell 自身も殺してしまうので避ける。tmux kill-session が最も安全。
 
 ---
 

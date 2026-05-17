@@ -592,14 +592,14 @@ F:/project/game_servers/
 
 各フェーズは独立して動作確認可能なゴールを持つ。
 
-### Phase 0: 検証 (1〜2 日)
+### Phase 0: 検証 (1〜2 日) — 完了 (2026-05-17)
 
-- [ ] AWS マネコンで手動 EC2 (m7a.xlarge spot) 起動
-- [ ] ATM11 を 10GB ヒープで起動、5 分プレイ
-- [ ] `spark profiler` で mspt、heap、GC 計測
-- [ ] EBS snapshot 手動作成 → 別 EC2 から復元動作確認
+- [x] AWS マネコンで手動 EC2 (m7a.xlarge spot) 起動
+- [x] ATM11 を 10GB ヒープで起動、5 分プレイ
+- [x] `spark profiler` で mspt、heap、GC 計測
+- [x] EBS snapshot 手動作成 → 別 EC2 から復元動作確認
 
-ゴール: インスタンスタイプと EBS サイズの確定
+ゴール: インスタンスタイプと EBS サイズの確定 — **達成** (詳細は `docs/phase0-results.md`)
 
 ### Phase 1: Workers 最小実装 (2〜3 日)
 
