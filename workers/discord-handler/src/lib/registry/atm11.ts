@@ -3,7 +3,7 @@
 // Phase 2 で Workers KV (GAME_REGISTRY) に投入し、`getGameDefinition(gameId)` で KV から
 // 引く形に切り替える。スキーマ自体 (GameDefinition) は同じ。
 
-import atm11RegistryRaw from '../../../../../games/atm11/registry.json' with { type: 'json' };
+import atm11RegistryRaw from '../../../../../games/atm11/registry.json';
 
 import type { GameDefinition } from './types.js';
 

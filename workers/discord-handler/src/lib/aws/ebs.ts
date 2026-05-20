@@ -258,12 +258,34 @@ export async function describeSnapshotsByTag(
   return items.map(rawSnapshotToDetail);
 }
 
+// game-world データ volume の snapshot だけに付与するマーカー tag。
+//
+// RunInstances の TagSpecification(ResourceType=volume) は root volume にも tag を
+// 伝播させるため、volume 由来の tag (Purpose=game-world 等) では「正しい game-world
+// data volume の snapshot」と「root volume の snapshot (= 過去の /stop バグで混入した
+// パーティション付き root クローン)」を区別できない。
+//
+// このマーカーは CreateSnapshot 時にのみ付与する snapshot 専用 tag。volume には
+// 一切付かないので root クローンが誤って持つことはない。/start の復元 (getLatest-
+// CompletedSnapshot) はこの tag を持つ snapshot だけを対象にする。
+export const GAME_WORLD_SNAPSHOT_TAG_KEY = 'SnapshotType';
+export const GAME_WORLD_SNAPSHOT_TAG_VALUE = 'game-world-data';
+
 // startTime 降順で最新の completed snapshot を返す。なければ undefined。
+//
+// root volume クローンを誤って掴まないよう、game-world data マーカー tag
+// (SnapshotType=game-world-data) を必須フィルタとして強制する。マーカー付き snapshot
+// が 1 つも無ければ undefined を返し、呼び出し側 (start.ts) は env seed
+// (ATM11_SNAPSHOT_ID) にフォールバックする。
 export async function getLatestCompletedSnapshot(
   client: AwsApiClient,
   tags: Record<string, string>,
 ): Promise<SnapshotDetail | undefined> {
-  const all = await describeSnapshotsByTag(client, tags, ['completed']);
+  const filterTags = {
+    ...tags,
+    [GAME_WORLD_SNAPSHOT_TAG_KEY]: GAME_WORLD_SNAPSHOT_TAG_VALUE,
+  };
+  const all = await describeSnapshotsByTag(client, filterTags, ['completed']);
   if (all.length === 0) return undefined;
   // startTime は ISO8601、文字列比較で正しい順序になる
   all.sort((a, b) => (a.startTime < b.startTime ? 1 : -1));

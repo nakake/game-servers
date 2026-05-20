@@ -50,6 +50,8 @@ export {
   createSnapshot,
   describeSnapshotsByTag,
   getLatestCompletedSnapshot,
+  GAME_WORLD_SNAPSHOT_TAG_KEY,
+  GAME_WORLD_SNAPSHOT_TAG_VALUE,
 } from './ebs.js';
 export type {
   VolumeDetail,

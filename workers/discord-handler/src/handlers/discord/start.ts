@@ -104,12 +104,17 @@ async function executeStart(gameId: string, interaction: Interaction, env: Env):
 
     // 3. user-data 生成 (EBS mount → S3 から launcher tarball → SSM から RCON pw → docker build/run)
     const awsRegion = env.AWS_REGION ?? 'ap-northeast-1';
+    const fqdn = `${game.subdomain}.${env.CLOUDFLARE_BASE_DOMAIN}`;
     const userData = base64EncodeUserData(
       buildAtm11UserData({
         game,
         launcherTarballS3Uri: env.LAUNCHER_TARBALL_S3_URI,
         rconPasswordSsmPath: env.ATM11_RCON_PASSWORD_SSM_PATH,
         awsRegion,
+        fqdn,
+        ...(env.SNS_ALLOWED_TOPIC_ARN !== undefined && env.SNS_ALLOWED_TOPIC_ARN !== ''
+          ? { readyNotifySnsTopicArn: env.SNS_ALLOWED_TOPIC_ARN }
+          : {}),
       }),
     );
 
@@ -168,7 +173,6 @@ async function executeStart(gameId: string, interaction: Interaction, env: Env):
     }
 
     // 4. Cloudflare DNS 更新
-    const fqdn = `${game.subdomain}.${env.CLOUDFLARE_BASE_DOMAIN}`;
     await cf.updateRecord({
       zoneId: env.CLOUDFLARE_ZONE_ID,
       recordId: env.ATM11_CF_RECORD_ID,

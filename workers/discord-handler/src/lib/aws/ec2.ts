@@ -12,6 +12,7 @@
 import { XMLParser } from 'fast-xml-parser';
 
 import type { AwsApiClient } from './client.js';
+import { AwsApiError } from './errors.js';
 
 const EC2_API_VERSION = '2016-11-15';
 
@@ -342,7 +343,17 @@ export async function waitForInstanceRunning(
   const deadline = Date.now() + (options.timeoutMs ?? 180_000);
 
   while (Date.now() < deadline) {
-    const [inst] = await describeInstances(client, [options.instanceId]);
+    let inst: InstanceDetail | undefined;
+    try {
+      [inst] = await describeInstances(client, [options.instanceId]);
+    } catch (err) {
+      // RunInstances 直後は eventual consistency で DescribeInstances が
+      // InvalidInstanceID.NotFound (HTTP 400) を返すことがある (instance ID 未伝播)。
+      // terminal error ではないので polling を継続する。それ以外の error は re-throw。
+      if (!(err instanceof AwsApiError && err.awsErrorCode === 'InvalidInstanceID.NotFound')) {
+        throw err;
+      }
+    }
     if (inst === undefined) {
       // 直後はまだ ec2 が見えないことがある。猶予を与える。
     } else if (inst.state === 'running' && inst.publicIp !== undefined) {

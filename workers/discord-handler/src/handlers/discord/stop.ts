@@ -14,6 +14,8 @@ import {
   sendShellCommand,
   terminateInstances,
   waitForCommand,
+  GAME_WORLD_SNAPSHOT_TAG_KEY,
+  GAME_WORLD_SNAPSHOT_TAG_VALUE,
 } from '../../lib/aws/index.js';
 import { CloudflareDnsClient } from '../../lib/cloudflare/index.js';
 import { DiscordFollowUpClient } from '../../lib/discord/follow-up.js';
@@ -84,19 +86,25 @@ async function executeStop(gameId: string, interaction: Interaction, env: Env): 
       return;
     }
 
-    // 2. attached な game-world volume を特定 (CreateSnapshot 対象)
+    // 2. attached な game-world volume を特定 (CreateSnapshot 対象)。
+    //    Tag フィルタだと RunInstances の TagSpecification(ResourceType=volume) が
+    //    root volume も同じ Tag で巻き込んでしまうため、device 名 (/dev/sdf) で
+    //    deterministic に絞り込む。/start が blockDeviceMappings で指定する device。
+    const dataDevice = '/dev/sdf';
     const volumes = await describeVolumesByTag(
       ec2,
       { Game: gameId, Purpose: 'game-world' },
       ['in-use'],
     );
     const liveVolume = volumes.find((v) =>
-      v.attachments.some((a) => a.instanceId === inst.instanceId),
+      v.attachments.some(
+        (a) => a.instanceId === inst.instanceId && a.device === dataDevice,
+      ),
     );
     if (liveVolume === undefined) {
       await safeEdit(
         followUp,
-        `⚠️ game-world volume が見つかりません (Tag Game=${gameId},Purpose=game-world)。\n` +
+        `⚠️ game-world volume が見つかりません (instance=${inst.instanceId}, device=${dataDevice})。\n` +
           `snapshot をスキップして停止続行します`,
       );
     }
@@ -139,6 +147,10 @@ async function executeStop(gameId: string, interaction: Interaction, env: Env): 
             Project: 'game-servers',
             Game: gameId,
             Purpose: 'game-world',
+            // getLatestCompletedSnapshot が root クローンと区別するためのマーカー。
+            // ここは /dev/sdf の data volume (liveVolume) だけを snapshot しているので
+            // このマーカーを付けてよい (root volume には付かない)。
+            [GAME_WORLD_SNAPSHOT_TAG_KEY]: GAME_WORLD_SNAPSHOT_TAG_VALUE,
             CreatedAt: new Date().toISOString(),
           },
         });
