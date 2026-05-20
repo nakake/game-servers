@@ -34,7 +34,7 @@ export default {
     }
 
     if (request.method === 'POST' && url.pathname === '/aws/notification') {
-      return handleAwsNotification(request, env);
+      return handleAwsNotification(request, env, ctx);
     }
 
     if (request.method === 'POST' && url.pathname === '/admin/docker-stop') {

@@ -66,8 +66,8 @@
   },
 
   "discord": {
-    "start_message": "ATM11 を起動中...初回ロードは40〜60秒かかります",
-    "ready_message": "ATM11 起動完了! `atm11.example.com:25565` で接続できます",
+    "start_message": "ATM11 を起動しています… (EC2 の確保に 1〜2 分)",
+    "ready_message": "サーバーの起動が完了しました",
     "stop_message": "ATM11 を停止しました。次回起動まで世界は保存されています"
   }
 }

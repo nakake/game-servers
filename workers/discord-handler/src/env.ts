@@ -59,7 +59,11 @@ export interface Env {
   // Discord channel 設定 → Integrations → Webhooks で発行
   DISCORD_WEBHOOK_URL?: string;
 
-  // ---- KV bindings (Phase 1 後半で wrangler.toml に追加した時に揃える) ----
+  // ---- KV bindings ----
+  // /start 〜 ready 通知の間、interaction の文脈 (token / userId) を一時保存する。
+  // optional: 未バインドなら ready 通知は webhook のみ (元メッセージ編集 + mention を skip)。
+  // 実体作成: `wrangler kv namespace create SERVER_STATE` → wrangler.toml に id を記載。
+  SERVER_STATE?: KVNamespace;
+  // GAME_REGISTRY は Phase 2 で registry.json を KV 化する際に追加予定。
   // GAME_REGISTRY: KVNamespace;
-  // SERVER_STATE: KVNamespace;
 }
