@@ -17,6 +17,11 @@
 
 $ErrorActionPreference = 'Stop'
 
+# 継承された AWS 認証 env を一旦消す。前回の tf.ps1 実行が呼び出し元シェルに残した
+# 失効トークンを export-credentials が再利用してしまうのを防ぎ、必ず CLI の login
+# セッションから取り直す。
+Remove-Item Env:AWS_ACCESS_KEY_ID, Env:AWS_SECRET_ACCESS_KEY, Env:AWS_SESSION_TOKEN -ErrorAction SilentlyContinue
+
 # --- AWS 認証ブリッジ (docs/iac-migration-plan.md Step 0 の運用メモ参照) ---
 # export-credentials は失効間際のキャッシュをそのまま返すことがあり、その場合
 # terraform 実行中に ExpiredToken で落ちる。先に get-caller-identity を一度呼んで
@@ -39,6 +44,13 @@ if (-not $tf) {
 if (-not $tf) { throw "terraform.exe not found (PATH / winget パッケージ配置のいずれにも無い)" }
 
 # --- envs/prod を作業ディレクトリにして terraform 実行 ---
+# 認証 env は terraform 実行中だけ有効にし、終了時に必ず消す (呼び出し元シェルに
+# やがて失効する認証情報を残さない)。
 $prodDir = Join-Path $PSScriptRoot 'envs\prod'
-& $tf -chdir="$prodDir" @args
-exit $LASTEXITCODE
+try {
+  & $tf -chdir="$prodDir" @args
+  $code = $LASTEXITCODE
+} finally {
+  Remove-Item Env:AWS_ACCESS_KEY_ID, Env:AWS_SECRET_ACCESS_KEY, Env:AWS_SESSION_TOKEN -ErrorAction SilentlyContinue
+}
+exit $code
