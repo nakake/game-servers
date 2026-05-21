@@ -16,11 +16,10 @@ enabled = true
 AWS_REGION = "ap-northeast-1"
 CLOUDFLARE_ZONE_ID = "<YOUR_CLOUDFLARE_ZONE_ID>"
 CLOUDFLARE_BASE_DOMAIN = "example.com"
+# EC2 起動先。AMI / Key / SG / IAM profile / Spot / EBS base / 静的タグは
+# Launch Template (gs-game-server) 側。値は `infra/tf.ps1 output launch_template_id`。
+EC2_LAUNCH_TEMPLATE_ID = "<YOUR_LAUNCH_TEMPLATE_ID>"
 EC2_SUBNET_ID = "<YOUR_SUBNET_ID>"
-EC2_SECURITY_GROUP_ID = "sg-00cb1cc5269f27870"
-EC2_KEY_NAME = "gs-phase0-key"
-EC2_IMAGE_ID = "resolve:ssm:/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64"
-EC2_INSTANCE_PROFILE_NAME = "gs-phase0-ec2-role"
 ATM11_SNAPSHOT_ID = "<YOUR_SEED_SNAPSHOT_ID>"
 ATM11_CF_RECORD_ID = "<YOUR_CF_RECORD_ID>"
 ATM11_RCON_PASSWORD_SSM_PATH = "/gs/atm11/rcon_password"

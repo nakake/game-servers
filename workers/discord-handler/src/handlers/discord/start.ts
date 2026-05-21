@@ -160,21 +160,29 @@ async function executeStart(gameId: string, interaction: Interaction, env: Env):
       }),
     );
 
-    // 4. RunInstances (Spot, snapshot から root とは別 EBS を attach)
+    // 4. RunInstances — Launch Template (gs-game-server) 経由で起動 (IaC 移行 Step 5)。
+    //    AMI / Key / SG / IAM profile / Spot 設定 / EBS base / 静的タグは LT 側で定義済み。
+    //    ここではゲーム別の値だけ override する:
+    //      - instanceType : registry の instance_types[0]
+    //      - subnetId     : LT には含めない (default VPC の subnet を Worker が指定)
+    //      - userData     : LT は空、Worker が生成して渡す
+    //      - blockDeviceMappings : /dev/sdf を全フィールド指定で渡す。snapshotId / volumeSize
+    //        はゲーム別。volumeType / deleteOnTermination も明示する — LT に同名 device が
+    //        あっても request 側の device 指定が優先されるため、deleteOnTermination=false
+    //        (world データ保護) を LT 任せにせず必ずここで指定する。
+    //      - instanceTags / volumeTags : LT の静的タグとマージされるが、Project は Worker 側でも
+    //        必ず付ける — gs-worker-caller の ssm:SendCommand が aws:ResourceTag/Project に
+    //        条件付けされており /stop が依存するため、マージ挙動に賭けない。
     const primaryInstanceType = game.instance_types[0] ?? 'r7a.large';
     const result = await runInstances(ec2, {
-      imageId: env.EC2_IMAGE_ID,
+      launchTemplate: { launchTemplateId: env.EC2_LAUNCH_TEMPLATE_ID, version: '$Latest' },
       instanceType: primaryInstanceType,
-      keyName: env.EC2_KEY_NAME,
-      securityGroupIds: [env.EC2_SECURITY_GROUP_ID],
       subnetId: env.EC2_SUBNET_ID,
-      iamInstanceProfileName: env.EC2_INSTANCE_PROFILE_NAME,
       userData,
-      spot: true,
       instanceTags: {
         Project: 'game-servers',
         Game: gameId,
-        Env: 'phase1',
+        Env: 'prod',
         Name: `gs-${gameId}`,
       },
       volumeTags: {

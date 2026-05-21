@@ -28,12 +28,10 @@ CLOUDFLARE_ZONE_ID=
 # FQDN 組み立てに使うベースドメイン (例: example.com → atm11.example.com)
 CLOUDFLARE_BASE_DOMAIN=example.com
 
-# ---- EC2 起動パラメータ (Phase 1 hardcode、Phase 2 で Terraform output 経由に) ----
+# ---- EC2 起動パラメータ ----
+# Launch Template ID。`infra/tf.ps1 output launch_template_id` で取得。
+EC2_LAUNCH_TEMPLATE_ID=lt-xxxxxxxxxxxxxxxxx
 EC2_SUBNET_ID=subnet-xxxxxxxx
-EC2_SECURITY_GROUP_ID=sg-xxxxxxxx
-EC2_KEY_NAME=gs-phase0-key
-EC2_IMAGE_ID=resolve:ssm:/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64
-EC2_INSTANCE_PROFILE_NAME=gs-phase0-ec2-role
 
 # ---- ATM11 固有 (Phase 1 hardcode) ----
 ATM11_SNAPSHOT_ID=snap-xxxxxxxx

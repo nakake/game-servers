@@ -30,14 +30,13 @@ export interface Env {
   // FQDN 組み立てに使う (例: "example.com"、subdomain="atm11" → atm11.example.com)
   CLOUDFLARE_BASE_DOMAIN: string;
 
-  // ---- EC2 起動パラメータ (Phase 1 hardcode、Phase 2 で Terraform output から KV へ) ----
+  // ---- EC2 起動パラメータ ----
+  // Launch Template ID (Terraform: aws_launch_template.game_server / output launch_template_id)。
+  // AMI / Key / SG / IAM profile / Spot 設定 / EBS base / 静的タグは LT 側で定義され、
+  // Worker は LT を参照しつつ instance type / user-data / snapshot などゲーム別の値だけ override する。
+  EC2_LAUNCH_TEMPLATE_ID: string;
+  // インスタンスを起動する subnet。LT には含めず Worker が指定する (default VPC の subnet)。
   EC2_SUBNET_ID: string;
-  EC2_SECURITY_GROUP_ID: string;
-  EC2_KEY_NAME: string;
-  // resolve:ssm:/aws/service/... 形式も可
-  EC2_IMAGE_ID: string;
-  // IAM Instance Profile (AmazonSSMManagedInstanceCore + その他 attach 済み)
-  EC2_INSTANCE_PROFILE_NAME: string;
 
   // ---- ATM11 固有 (Phase 1 hardcode、Phase 2 で registry/KV へ移す) ----
   // Phase 0 で取った snapshot を再利用する EBS volume の元

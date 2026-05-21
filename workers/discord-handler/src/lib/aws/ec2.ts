@@ -2,7 +2,7 @@
 // AwsApiClient.queryRequest を使い、レスポンスは fast-xml-parser でパースする。
 //
 // Phase 1 hardcode `/start atm11` で使う最小機能:
-//   - runInstances (Spot, instance market option 経由)
+//   - runInstances (Launch Template 経由で起動。Spot 設定は LT 側)
 //   - describeInstances (Public IP 取得 polling 用)
 //   - terminateInstances (停止用)
 //   - waitForInstanceRunning (`pending` → `running` 待ち)
@@ -28,23 +28,34 @@ const xmlParser = new XMLParser({
 // ----------------------------------------------------------------------
 
 export interface RunInstancesInput {
-  // ami-xxx or `resolve:ssm:/aws/service/ami-amazon-linux-latest/...`
-  imageId: string;
+  // Launch Template 経由で起動する場合に指定。LT が AMI / Key / SG / IAM profile /
+  // Spot 設定 / EBS base / 静的タグを供給するため、対応する個別フィールドは省略できる。
+  launchTemplate?: {
+    launchTemplateId: string;
+    // 省略時は "$Latest"。
+    version?: string;
+  };
+  // ami-xxx or `resolve:ssm:/aws/service/ami-amazon-linux-latest/...`。
+  // launchTemplate 指定時は LT 側の AMI を使うため省略可。
+  imageId?: string;
   instanceType: string;
   keyName?: string;
-  securityGroupIds: string[];
+  // launchTemplate 指定時は LT 側の SG を使うため省略可。
+  securityGroupIds?: string[];
   subnetId?: string;
   iamInstanceProfileName?: string;
   // user-data は呼び出し側で base64 エンコード済みの文字列を渡す。
   userData?: string;
   // Spot で起動するか。false / 省略時は on-demand。
+  // launchTemplate 指定時は LT 側の instance_market_options が使われるため省略する。
   spot?: boolean;
   // spot 上限価格 (USD/h)。null 相当を渡したい時は空文字列ではなく省略する。
   spotMaxPriceUsd?: string;
-  // instance リソースに付与するタグ。
+  // instance リソースに付与するタグ。LT の tag_specifications とマージされる。
   instanceTags?: Record<string, string>;
-  // EBS ボリュームに付与するタグ。
+  // EBS ボリュームに付与するタグ。LT の tag_specifications とマージされる。
   volumeTags?: Record<string, string>;
+  // BlockDeviceMapping。LT に同名 device がある場合、ここで指定した device が優先される。
   blockDeviceMappings?: BlockDeviceMapping[];
 }
 
@@ -84,11 +95,15 @@ function buildTagSpecificationParams(
 
 function buildRunInstancesParams(input: RunInstancesInput): Record<string, string> {
   const params: Record<string, string> = {
-    ImageId: input.imageId,
     MinCount: '1',
     MaxCount: '1',
     InstanceType: input.instanceType,
   };
+  if (input.launchTemplate !== undefined) {
+    params['LaunchTemplate.LaunchTemplateId'] = input.launchTemplate.launchTemplateId;
+    params['LaunchTemplate.Version'] = input.launchTemplate.version ?? '$Latest';
+  }
+  if (input.imageId !== undefined) params['ImageId'] = input.imageId;
   if (input.keyName !== undefined) params['KeyName'] = input.keyName;
   if (input.subnetId !== undefined) params['SubnetId'] = input.subnetId;
   if (input.iamInstanceProfileName !== undefined) {
@@ -96,7 +111,7 @@ function buildRunInstancesParams(input: RunInstancesInput): Record<string, strin
   }
   if (input.userData !== undefined) params['UserData'] = input.userData;
 
-  input.securityGroupIds.forEach((sg, i) => {
+  (input.securityGroupIds ?? []).forEach((sg, i) => {
     params[`SecurityGroupId.${i + 1}`] = sg;
   });
 
