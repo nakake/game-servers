@@ -27,3 +27,8 @@ output "s3_game_configs_bucket" {
   description = "ゲーム設定 / launcher tarball 配布用 bucket 名 (wrangler.toml の LAUNCHER_TARBALL_S3_URI に対応)"
   value       = aws_s3_bucket.gs_game_configs.id
 }
+
+output "key_pair_name" {
+  description = "EC2 SSH ログイン用 Key Pair 名 (wrangler.toml の EC2_KEY_NAME に対応)"
+  value       = data.aws_key_pair.gs_phase0.key_name
+}
