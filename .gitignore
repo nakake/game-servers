@@ -54,7 +54,7 @@ coverage/
 # Terraform
 # ============================================================
 .terraform/
-.terraform.lock.hcl
+# .terraform.lock.hcl は commit する (provider バージョン固定・再現性 — HashiCorp 推奨)
 *.tfstate
 *.tfstate.*
 *.tfvars

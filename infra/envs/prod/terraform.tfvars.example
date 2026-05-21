@@ -1,0 +1,11 @@
+# cp して terraform.tfvars にして埋める (terraform.tfvars は .gitignore 済み)
+#
+# worker_notification_url は wrangler deploy 後の URL:
+#   https://discord-handler.<account>.workers.dev/aws/notification
+
+aws_region              = "ap-northeast-1"
+worker_notification_url = "https://discord-handler.<your-account>.workers.dev/aws/notification"
+
+# 既定でよければ以下は省略可
+# monthly_budget_usd               = 20
+# budget_warning_threshold_percent = 75

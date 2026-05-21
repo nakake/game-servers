@@ -1,0 +1,442 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Game Servers — インフラ構成図</title>
+<style>
+  body { margin:0; background:#e9ebef; font-family:"Segoe UI","Hiragino Kaku Gothic ProN","Yu Gothic UI",Meiryo,sans-serif; }
+  .page { max-width:1540px; margin:0 auto; padding:20px 10px 50px; }
+  .hint { text-align:center; color:#5b6470; font-size:.82rem; margin:6px 0 14px; }
+  svg { width:100%; height:auto; background:#fcfcfd; border:1px solid #cdd2db;
+        border-radius:10px; box-shadow:0 6px 28px rgba(0,0,0,.10); }
+</style>
+</head>
+<body>
+<div class="page">
+  <p class="hint">出典: <code>docs/design.md</code> rev 2 ／ <code>docs/iac-migration-plan.md</code> ｜ ブラウザで開いて閲覧・印刷・SVG として保存できます</p>
+
+<svg viewBox="0 0 1520 1545" xmlns="http://www.w3.org/2000/svg" font-family="'Segoe UI','Yu Gothic UI',Meiryo,sans-serif">
+
+<defs>
+  <!-- arrowhead markers -->
+  <marker id="aBlue" markerWidth="11" markerHeight="11" refX="8.5" refY="4" orient="auto"><path d="M0 0L9 4L0 8Z" fill="#2563EB"/></marker>
+  <marker id="aGreen" markerWidth="11" markerHeight="11" refX="8.5" refY="4" orient="auto"><path d="M0 0L9 4L0 8Z" fill="#4D7C0F"/></marker>
+  <marker id="aPink" markerWidth="11" markerHeight="11" refX="8.5" refY="4" orient="auto"><path d="M0 0L9 4L0 8Z" fill="#DB2777"/></marker>
+  <marker id="aGray" markerWidth="11" markerHeight="11" refX="8.5" refY="4" orient="auto"><path d="M0 0L9 4L0 8Z" fill="#6B7280"/></marker>
+  <marker id="aDis" markerWidth="11" markerHeight="11" refX="8.5" refY="4" orient="auto"><path d="M0 0L9 4L0 8Z" fill="#5865F2"/></marker>
+
+  <!-- ===== service icon symbols (64x64) ===== -->
+  <symbol id="discord" viewBox="0 0 64 64">
+    <rect x="2" y="2" width="60" height="60" rx="11" fill="#5865F2" stroke="rgba(0,0,0,.15)"/>
+    <ellipse cx="32" cy="34" rx="18" ry="13" fill="#fff"/>
+    <path d="M22 44 L18 50 M42 44 L46 50" stroke="#fff" stroke-width="4" stroke-linecap="round"/>
+    <ellipse cx="25" cy="34" rx="3.2" ry="4.2" fill="#5865F2"/>
+    <ellipse cx="39" cy="34" rx="3.2" ry="4.2" fill="#5865F2"/>
+  </symbol>
+
+  <symbol id="workers" viewBox="0 0 64 64">
+    <rect x="2" y="2" width="60" height="60" rx="11" fill="#F6821F" stroke="rgba(0,0,0,.15)"/>
+    <circle cx="25" cy="35" r="9" fill="#fff"/><circle cx="40" cy="31" r="11" fill="#fff"/>
+    <circle cx="43" cy="38" r="8" fill="#fff"/><rect x="21" y="35" width="24" height="10" rx="5" fill="#fff"/>
+    <path d="M26 28 L21 33 L26 38 M38 28 L43 33 L38 38" stroke="#F6821F" stroke-width="2.4" fill="none" stroke-linecap="round"/>
+  </symbol>
+
+  <symbol id="kv" viewBox="0 0 64 64">
+    <rect x="2" y="2" width="60" height="60" rx="11" fill="#F6821F" stroke="rgba(0,0,0,.15)"/>
+    <path d="M20 24 L20 40 A12 5 0 0 0 44 40 L44 24 Z" fill="#fff"/>
+    <ellipse cx="32" cy="24" rx="12" ry="5" fill="#fff"/>
+    <ellipse cx="32" cy="24" rx="12" ry="5" fill="none" stroke="#F6821F" stroke-width="2.2"/>
+    <path d="M20 32 A12 5 0 0 0 44 32" fill="none" stroke="#F6821F" stroke-width="2.2"/>
+  </symbol>
+
+  <symbol id="secret" viewBox="0 0 64 64">
+    <rect x="2" y="2" width="60" height="60" rx="11" fill="#475569" stroke="rgba(0,0,0,.15)"/>
+    <circle cx="25" cy="40" r="9" fill="none" stroke="#fff" stroke-width="4.5"/>
+    <line x1="30" y1="35" x2="46" y2="19" stroke="#fff" stroke-width="4.5" stroke-linecap="round"/>
+    <line x1="42" y1="23" x2="46" y2="27" stroke="#fff" stroke-width="4.5" stroke-linecap="round"/>
+    <line x1="37" y1="28" x2="41" y2="32" stroke="#fff" stroke-width="4.5" stroke-linecap="round"/>
+  </symbol>
+
+  <symbol id="cron" viewBox="0 0 64 64">
+    <rect x="2" y="2" width="60" height="60" rx="11" fill="#F6821F" stroke="rgba(0,0,0,.15)"/>
+    <circle cx="32" cy="33" r="15" fill="none" stroke="#fff" stroke-width="4"/>
+    <line x1="32" y1="33" x2="32" y2="22" stroke="#fff" stroke-width="4" stroke-linecap="round"/>
+    <line x1="32" y1="33" x2="41" y2="37" stroke="#fff" stroke-width="4" stroke-linecap="round"/>
+  </symbol>
+
+  <symbol id="dns" viewBox="0 0 64 64">
+    <rect x="2" y="2" width="60" height="60" rx="11" fill="#F6821F" stroke="rgba(0,0,0,.15)"/>
+    <circle cx="32" cy="32" r="15" fill="none" stroke="#fff" stroke-width="3.6"/>
+    <ellipse cx="32" cy="32" rx="6.5" ry="15" fill="none" stroke="#fff" stroke-width="3"/>
+    <line x1="17" y1="32" x2="47" y2="32" stroke="#fff" stroke-width="3"/>
+  </symbol>
+
+  <symbol id="ec2" viewBox="0 0 64 64">
+    <rect x="2" y="2" width="60" height="60" rx="11" fill="#ED7100" stroke="rgba(0,0,0,.15)"/>
+    <rect x="21" y="21" width="22" height="22" rx="2" fill="#fff"/>
+    <g stroke="#fff" stroke-width="3.4" stroke-linecap="round">
+      <line x1="27" y1="14" x2="27" y2="21"/><line x1="37" y1="14" x2="37" y2="21"/>
+      <line x1="27" y1="43" x2="27" y2="50"/><line x1="37" y1="43" x2="37" y2="50"/>
+      <line x1="14" y1="27" x2="21" y2="27"/><line x1="14" y1="37" x2="21" y2="37"/>
+      <line x1="43" y1="27" x2="50" y2="27"/><line x1="43" y1="37" x2="50" y2="37"/>
+    </g>
+  </symbol>
+
+  <symbol id="ami" viewBox="0 0 64 64">
+    <rect x="2" y="2" width="60" height="60" rx="11" fill="#ED7100" stroke="rgba(0,0,0,.15)"/>
+    <polygon points="32,36 46,42 32,48 18,42" fill="#fff" stroke="#ED7100" stroke-width="1.6"/>
+    <polygon points="32,28 46,34 32,40 18,34" fill="#fff" stroke="#ED7100" stroke-width="1.6"/>
+    <polygon points="32,20 46,26 32,32 18,26" fill="#fff" stroke="#ED7100" stroke-width="1.6"/>
+  </symbol>
+
+  <symbol id="lt" viewBox="0 0 64 64">
+    <rect x="2" y="2" width="60" height="60" rx="11" fill="#ED7100" stroke="rgba(0,0,0,.15)"/>
+    <path d="M32 13 C40 21 40 34 36 42 H28 C24 34 24 21 32 13 Z" fill="#fff"/>
+    <path d="M28 36 L21 47 L28 42 Z" fill="#fff"/><path d="M36 36 L43 47 L36 42 Z" fill="#fff"/>
+    <circle cx="32" cy="26" r="3.6" fill="#ED7100"/>
+    <path d="M29 43 L32 52 L35 43 Z" fill="#fff"/>
+  </symbol>
+
+  <symbol id="ebs" viewBox="0 0 64 64">
+    <rect x="2" y="2" width="60" height="60" rx="11" fill="#7AA116" stroke="rgba(0,0,0,.15)"/>
+    <path d="M20 24 L20 40 A12 5 0 0 0 44 40 L44 24 Z" fill="#fff"/>
+    <ellipse cx="32" cy="24" rx="12" ry="5" fill="#fff"/>
+    <ellipse cx="32" cy="24" rx="12" ry="5" fill="none" stroke="#7AA116" stroke-width="2.2"/>
+    <path d="M20 32 A12 5 0 0 0 44 32" fill="none" stroke="#7AA116" stroke-width="2.2"/>
+  </symbol>
+
+  <symbol id="snap" viewBox="0 0 64 64">
+    <rect x="2" y="2" width="60" height="60" rx="11" fill="#7AA116" stroke="rgba(0,0,0,.15)"/>
+    <path d="M18 28 L18 42 A11 5 0 0 0 40 42 L40 28 Z" fill="#fff"/>
+    <ellipse cx="29" cy="28" rx="11" ry="5" fill="#fff"/>
+    <ellipse cx="29" cy="28" rx="11" ry="5" fill="none" stroke="#7AA116" stroke-width="2.2"/>
+    <circle cx="44" cy="22" r="9" fill="#fff" stroke="#7AA116" stroke-width="2"/>
+    <circle cx="44" cy="22" r="3.6" fill="#7AA116"/>
+  </symbol>
+
+  <symbol id="dlm" viewBox="0 0 64 64">
+    <rect x="2" y="2" width="60" height="60" rx="11" fill="#7AA116" stroke="rgba(0,0,0,.15)"/>
+    <circle cx="32" cy="33" r="14" fill="none" stroke="#fff" stroke-width="4" stroke-dasharray="40 14" stroke-linecap="round"/>
+    <path d="M32 13 L40 20 L31 24 Z" fill="#fff"/>
+  </symbol>
+
+  <symbol id="s3" viewBox="0 0 64 64">
+    <rect x="2" y="2" width="60" height="60" rx="11" fill="#7AA116" stroke="rgba(0,0,0,.15)"/>
+    <path d="M20 22 L24 44 A8 4 0 0 0 40 44 L44 22 Z" fill="#fff"/>
+    <ellipse cx="32" cy="22" rx="12" ry="4.5" fill="#fff"/>
+    <ellipse cx="32" cy="22" rx="12" ry="4.5" fill="none" stroke="#7AA116" stroke-width="2.2"/>
+  </symbol>
+
+  <symbol id="sns" viewBox="0 0 64 64">
+    <rect x="2" y="2" width="60" height="60" rx="11" fill="#E7157B" stroke="rgba(0,0,0,.15)"/>
+    <line x1="24" y1="32" x2="44" y2="20" stroke="#fff" stroke-width="2.8"/>
+    <line x1="24" y1="32" x2="46" y2="32" stroke="#fff" stroke-width="2.8"/>
+    <line x1="24" y1="32" x2="44" y2="44" stroke="#fff" stroke-width="2.8"/>
+    <circle cx="23" cy="32" r="7" fill="#fff"/>
+    <circle cx="45" cy="19" r="4.5" fill="#fff"/><circle cx="47" cy="32" r="4.5" fill="#fff"/><circle cx="45" cy="45" r="4.5" fill="#fff"/>
+  </symbol>
+
+  <symbol id="eb" viewBox="0 0 64 64">
+    <rect x="2" y="2" width="60" height="60" rx="11" fill="#E7157B" stroke="rgba(0,0,0,.15)"/>
+    <line x1="22" y1="16" x2="22" y2="48" stroke="#fff" stroke-width="3.4"/>
+    <line x1="22" y1="22" x2="40" y2="22" stroke="#fff" stroke-width="3"/>
+    <line x1="22" y1="32" x2="40" y2="32" stroke="#fff" stroke-width="3"/>
+    <line x1="22" y1="42" x2="40" y2="42" stroke="#fff" stroke-width="3"/>
+    <circle cx="22" cy="16" r="3.4" fill="#fff"/>
+    <circle cx="42" cy="22" r="3.4" fill="#fff"/><circle cx="42" cy="32" r="3.4" fill="#fff"/><circle cx="42" cy="42" r="3.4" fill="#fff"/>
+  </symbol>
+
+  <symbol id="budget" viewBox="0 0 64 64">
+    <rect x="2" y="2" width="60" height="60" rx="11" fill="#C026A7" stroke="rgba(0,0,0,.15)"/>
+    <circle cx="32" cy="32" r="14" fill="#fff"/>
+    <path d="M32 32 L32 18 A14 14 0 0 1 45.2 36.6 Z" fill="#C026A7"/>
+    <circle cx="32" cy="32" r="14" fill="none" stroke="#fff" stroke-width="1"/>
+  </symbol>
+
+  <symbol id="cw" viewBox="0 0 64 64">
+    <rect x="2" y="2" width="60" height="60" rx="11" fill="#C026A7" stroke="rgba(0,0,0,.15)"/>
+    <path d="M17 39 A15 15 0 0 1 47 39" fill="none" stroke="#fff" stroke-width="4.2" stroke-linecap="round"/>
+    <line x1="32" y1="39" x2="41" y2="26" stroke="#fff" stroke-width="3.6" stroke-linecap="round"/>
+    <circle cx="32" cy="39" r="4" fill="#fff"/>
+  </symbol>
+
+  <symbol id="ssm" viewBox="0 0 64 64">
+    <rect x="2" y="2" width="60" height="60" rx="11" fill="#C026A7" stroke="rgba(0,0,0,.15)"/>
+    <g stroke="#fff" stroke-width="3.4" stroke-linecap="round">
+      <line x1="43" y1="32" x2="49" y2="32"/><line x1="32" y1="43" x2="32" y2="49"/>
+      <line x1="21" y1="32" x2="15" y2="32"/><line x1="32" y1="21" x2="32" y2="15"/>
+      <line x1="40" y1="40" x2="44" y2="44"/><line x1="24" y1="40" x2="20" y2="44"/>
+      <line x1="24" y1="24" x2="20" y2="20"/><line x1="40" y1="24" x2="44" y2="20"/>
+    </g>
+    <circle cx="32" cy="32" r="9" fill="none" stroke="#fff" stroke-width="4.6"/>
+  </symbol>
+
+  <symbol id="iam" viewBox="0 0 64 64">
+    <rect x="2" y="2" width="60" height="60" rx="11" fill="#DD344C" stroke="rgba(0,0,0,.15)"/>
+    <path d="M24 31 V26 A8 8 0 0 1 40 26 V31" fill="none" stroke="#fff" stroke-width="4.4"/>
+    <rect x="19" y="31" width="26" height="19" rx="3.5" fill="#fff"/>
+    <circle cx="32" cy="38" r="3.4" fill="#DD344C"/>
+    <rect x="30.4" y="38" width="3.2" height="7" fill="#DD344C"/>
+  </symbol>
+
+  <symbol id="launcher" viewBox="0 0 64 64">
+    <rect x="2" y="2" width="60" height="60" rx="11" fill="#F59E0B" stroke="rgba(0,0,0,.15)"/>
+    <rect x="13" y="17" width="38" height="30" rx="5" fill="#fff"/>
+    <polyline points="21,27 28,32 21,37" fill="none" stroke="#F59E0B" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"/>
+    <line x1="31" y1="38" x2="42" y2="38" stroke="#F59E0B" stroke-width="3.4" stroke-linecap="round"/>
+  </symbol>
+
+  <symbol id="docker" viewBox="0 0 64 64">
+    <rect x="2" y="2" width="60" height="60" rx="11" fill="#2496ED" stroke="rgba(0,0,0,.15)"/>
+    <g fill="#fff">
+      <rect x="18" y="25" width="8" height="8"/><rect x="28" y="25" width="8" height="8"/>
+      <rect x="38" y="25" width="8" height="8"/><rect x="28" y="15" width="8" height="8"/>
+      <rect x="14" y="35" width="36" height="9" rx="4.5"/>
+    </g>
+    <path d="M46 33 q7 -1 9 -5 q1 6 -6 8 Z" fill="#fff"/>
+  </symbol>
+
+  <symbol id="sidecar" viewBox="0 0 64 64">
+    <rect x="2" y="2" width="60" height="60" rx="11" fill="#0D9488" stroke="rgba(0,0,0,.15)"/>
+    <polyline points="13,34 24,34 29,21 35,45 40,34 51,34" fill="none" stroke="#fff" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+  </symbol>
+</defs>
+
+<!-- ===================== TITLE ===================== -->
+<text x="760" y="40" text-anchor="middle" font-size="24" font-weight="700" fill="#1f2430">🎮 Game Servers — 想定インフラ構成図</text>
+<text x="760" y="62" text-anchor="middle" font-size="13" fill="#5b6470">Discord コマンド駆動・複数ゲーム対応 Spot 型ゲームサーバー基盤 ／ 制御プレーン = Cloudflare Workers, 実行プレーン = AWS EC2 Spot</text>
+
+<!-- ===================== FRAMES ===================== -->
+<!-- External -->
+<rect x="120" y="80" width="420" height="120" rx="10" fill="#F4F5FF" stroke="#5865F2" stroke-width="1.6"/>
+<text x="138" y="100" font-size="11" font-weight="700" fill="#5865F2" letter-spacing="1.5">EXTERNAL</text>
+
+<!-- Cloudflare -->
+<rect x="120" y="252" width="1280" height="250" rx="14" fill="#FFF7EF" stroke="#F6821F" stroke-width="2.2"/>
+<rect x="138" y="266" width="22" height="22" rx="4" fill="#F6821F"/>
+<path d="M144 282 a4 4 0 0 1 2 -7 a5 5 0 0 1 9 1 a3.5 3.5 0 0 1 1 6 Z" fill="#fff"/>
+<text x="170" y="283" font-size="15" font-weight="700" fill="#A85808">Cloudflare — 制御プレーン (Control Plane)</text>
+
+<!-- AWS -->
+<rect x="120" y="560" width="1320" height="912" rx="14" fill="#F7F8FA" stroke="#232F3E" stroke-width="2.4"/>
+<rect x="138" y="574" width="26" height="22" rx="4" fill="#232F3E"/>
+<text x="151" y="590" text-anchor="middle" font-size="13" font-weight="800" fill="#FF9900">aws</text>
+<text x="174" y="591" font-size="15" font-weight="700" fill="#232F3E">AWS — 実行プレーン (Execution Plane)</text>
+
+<!-- Region -->
+<rect x="150" y="612" width="1260" height="830" rx="10" fill="none" stroke="#00A4A6" stroke-width="1.8" stroke-dasharray="9 6"/>
+<text x="166" y="630" font-size="12.5" font-weight="700" fill="#00838A">Region — ap-northeast-1 (Tokyo)</text>
+
+<!-- VPC (container A) -->
+<rect x="172" y="662" width="568" height="742" rx="9" fill="#F1F8F1" stroke="#1F8A4C" stroke-width="1.8"/>
+<text x="188" y="682" font-size="12.5" font-weight="700" fill="#197A41">VPC — default VPC / Public Subnet ×3AZ (1a · 1c · 1d)</text>
+
+<!-- Security Group -->
+<rect x="198" y="816" width="516" height="572" rx="9" fill="#FCF1F2" stroke="#DD344C" stroke-width="1.6" stroke-dasharray="6 4"/>
+<text x="214" y="834" font-size="12" font-weight="700" fill="#C0293F">Security Group — game-server-sg / game-server-admin-sg</text>
+
+<!-- EC2 instance frame -->
+<rect x="222" y="866" width="468" height="506" rx="9" fill="#FFF6EC" stroke="#ED7100" stroke-width="1.8"/>
+
+<!-- Storage (container B) -->
+<rect x="762" y="662" width="296" height="742" rx="9" fill="#F4F8EC" stroke="#5E7E12" stroke-width="1.8"/>
+<text x="778" y="682" font-size="12.5" font-weight="700" fill="#5E7E12">Storage &amp; Backup</text>
+
+<!-- Notification (container C) -->
+<rect x="1080" y="662" width="316" height="742" rx="9" fill="#FBF0F7" stroke="#A0218C" stroke-width="1.8"/>
+<text x="1096" y="682" font-size="12.5" font-weight="700" fill="#A0218C">Notification / Observability / IAM</text>
+
+<!-- ===================== CONNECTORS ===================== -->
+<!-- Cloudflare internal "bus": Workers -> KV/Secrets/Cron/DNS -->
+<g stroke="#F6821F" stroke-width="1.6" fill="none" opacity=".85">
+  <line x1="230" y1="300" x2="1290" y2="300"/>
+  <line x1="230" y1="300" x2="230" y2="316"/><line x1="442" y1="300" x2="442" y2="316"/>
+  <line x1="654" y1="300" x2="654" y2="316"/><line x1="866" y1="300" x2="866" y2="316"/>
+  <line x1="1078" y1="300" x2="1078" y2="316"/><line x1="1290" y1="300" x2="1290" y2="316"/>
+</g>
+
+<!-- Discord <-> Workers -->
+<polyline points="205,200 205,316" fill="none" stroke="#5865F2" stroke-width="2.2" marker-end="url(#aDis)"/>
+<polyline points="250,316 250,200" fill="none" stroke="#5865F2" stroke-width="2.2" stroke-dasharray="7 5" marker-end="url(#aDis)"/>
+<text x="118" y="232" font-size="10.5" fill="#3b41b8">▼ Interaction (ed25519 検証)</text>
+<text x="262" y="246" font-size="10.5" fill="#3b41b8">▲ 遅延応答 / 通知 Webhook</text>
+
+<!-- Workers -> AWS API (down) + branches -->
+<polyline points="210,380 210,912 240,912" fill="none" stroke="#2563EB" stroke-width="2.2" marker-end="url(#aBlue)"/>
+<polyline points="210,630 1424,630 1424,1156 1196,1156" fill="none" stroke="#2563EB" stroke-width="2.2" marker-end="url(#aBlue)"/>
+<polyline points="210,650 792,650 792,902 878,902" fill="none" stroke="#2563EB" stroke-width="2.2" marker-end="url(#aBlue)"/>
+<text x="218" y="534" font-size="10.5" fill="#1d4ed8">AWS API (aws4fetch 署名呼出)</text>
+<text x="218" y="760" font-size="10.5" fill="#1d4ed8">EC2 RunInstances /</text>
+<text x="218" y="773" font-size="10.5" fill="#1d4ed8">CreateFleet / Terminate</text>
+<text x="980" y="624" font-size="10.5" fill="#1d4ed8">SSM SendCommand (docker stop)</text>
+<text x="470" y="644" font-size="10.5" fill="#1d4ed8">EBS CreateSnapshot</text>
+
+<!-- SNS -> Workers (notification) -->
+<polyline points="1162,716 1162,640 240,640 240,380" fill="none" stroke="#DB2777" stroke-width="2.2" stroke-dasharray="7 5" marker-end="url(#aPink)"/>
+<text x="560" y="635" font-size="10.5" fill="#be185d">SNS → Worker /aws/notification (HTTPS subscription)</text>
+
+<!-- sidecar -> Workers (callback) -->
+<polyline points="272,1240 160,1240 160,400 255,400 255,380" fill="none" stroke="#0D9488" stroke-width="2.2" stroke-dasharray="7 5" marker-end="url(#aPink)"/>
+<text x="92" y="900" font-size="10.5" fill="#0b7c70" transform="rotate(-90 92 900)">sidecar → Worker  /sidecar/idle-detected · /heartbeat  (HMAC)</text>
+
+<!-- EC2 -> EBS -->
+<polyline points="690,1000 820,1000 820,742 876,742" fill="none" stroke="#4D7C0F" stroke-width="2.2" marker-end="url(#aGreen)"/>
+<text x="700" y="994" font-size="10.5" fill="#3f6212">EBS volume attach (/dev/sdf)</text>
+<!-- EBS -> Snapshot -> DLM -> S3 -->
+<polyline points="912,774 912,866" fill="none" stroke="#4D7C0F" stroke-width="2.2" marker-end="url(#aGreen)"/>
+<polyline points="912,934 912,1026" fill="none" stroke="#4D7C0F" stroke-width="2.2" marker-end="url(#aGreen)"/>
+<polyline points="912,1094 912,1196" fill="none" stroke="#4D7C0F" stroke-width="2.2" marker-end="url(#aGreen)"/>
+<text x="922" y="824" font-size="10" fill="#3f6212">停止毎に作成</text>
+<text x="922" y="988" font-size="10" fill="#3f6212">3 世代へ集約</text>
+<text x="922" y="1152" font-size="10" fill="#3f6212">週次 S3 アーカイブ</text>
+<!-- EC2 -> S3 -->
+<polyline points="690,1232 876,1232" fill="none" stroke="#4D7C0F" stroke-width="2.2" marker-end="url(#aGreen)"/>
+<text x="700" y="1224" font-size="10.5" fill="#3f6212">config / modpack を S3 sync</text>
+<!-- EC2 -> CloudWatch -->
+<polyline points="690,1318 1248,1318 1248,988" fill="none" stroke="#6B7280" stroke-width="1.8" marker-end="url(#aGray)"/>
+<text x="700" y="1311" font-size="10.5" fill="#5b6470">サーバー / sidecar ログ → CloudWatch</text>
+<!-- SSM -> EC2 -->
+<polyline points="1162,1188 1162,1420 456,1420 456,1372" fill="none" stroke="#2563EB" stroke-width="2.2" marker-end="url(#aBlue)"/>
+<text x="470" y="1414" font-size="10.5" fill="#1d4ed8">SSM Agent が Run Command を EC2 上で実行</text>
+<!-- Budgets -> SNS / EventBridge -> SNS -->
+<polyline points="1162,920 1162,784" fill="none" stroke="#DB2777" stroke-width="2.2" marker-end="url(#aPink)"/>
+<text x="1172" y="858" font-size="10" fill="#be185d">Budget アラート</text>
+<polyline points="1282,748 1200,748" fill="none" stroke="#DB2777" stroke-width="2.2" marker-end="url(#aPink)"/>
+<text x="1206" y="724" font-size="10" fill="#be185d">Spot 中断 /</text>
+<text x="1206" y="736" font-size="10" fill="#be185d">DLM 失敗</text>
+<!-- IAM -> EC2 (instance role) -->
+<polyline points="1282,1156 694,1156" fill="none" stroke="#6B7280" stroke-width="1.8" stroke-dasharray="2 4" marker-end="url(#aGray)"/>
+<text x="760" y="1149" font-size="10.5" fill="#5b6470">gs-ec2-instance-role を EC2 が引受 (S3 / SSM / Logs)</text>
+
+<!-- ===================== ICON TILES + CAPTIONS ===================== -->
+<!-- External: Discord -->
+<use href="#discord" x="148" y="104" width="64" height="64"/>
+<text x="180" y="186" text-anchor="middle" font-size="12.5" font-weight="600" fill="#1f2430">Discord</text>
+<text x="240" y="124" font-size="11.5" fill="#3b3f52">▸ /start  /stop  /status  /list  /backup</text>
+<text x="240" y="148" font-size="11.5" fill="#3b3f52">▸ AWS アラートを Webhook で受信</text>
+<text x="240" y="166" font-size="10" fill="#8a8fa3">  (critical=赤 / warning=黄 / info=緑 で embed 色分け)</text>
+
+<!-- Cloudflare row -->
+<use href="#workers" x="198" y="316" width="64" height="64"/>
+<text x="230" y="397" text-anchor="middle" font-size="12" font-weight="600" fill="#1f2430">Workers</text>
+<text x="230" y="411" text-anchor="middle" font-size="10" fill="#7a7f90">discord-handler</text>
+
+<use href="#kv" x="410" y="316" width="64" height="64"/>
+<text x="442" y="397" text-anchor="middle" font-size="12" font-weight="600" fill="#1f2430">Workers KV</text>
+<text x="442" y="411" text-anchor="middle" font-size="10" fill="#7a7f90">GAME_REGISTRY</text>
+
+<use href="#kv" x="622" y="316" width="64" height="64"/>
+<text x="654" y="397" text-anchor="middle" font-size="12" font-weight="600" fill="#1f2430">Workers KV</text>
+<text x="654" y="411" text-anchor="middle" font-size="10" fill="#7a7f90">SERVER_STATE</text>
+
+<use href="#secret" x="834" y="316" width="64" height="64"/>
+<text x="866" y="397" text-anchor="middle" font-size="12" font-weight="600" fill="#1f2430">Secrets</text>
+<text x="866" y="411" text-anchor="middle" font-size="10" fill="#7a7f90">AWS·CF·Discord·HMAC</text>
+
+<use href="#cron" x="1046" y="316" width="64" height="64"/>
+<text x="1078" y="397" text-anchor="middle" font-size="12" font-weight="600" fill="#1f2430">Cron Triggers</text>
+<text x="1078" y="411" text-anchor="middle" font-size="10" fill="#7a7f90">idle 検知フォールバック</text>
+
+<use href="#dns" x="1258" y="316" width="64" height="64"/>
+<text x="1290" y="397" text-anchor="middle" font-size="12" font-weight="600" fill="#1f2430">Cloudflare DNS</text>
+<text x="1290" y="411" text-anchor="middle" font-size="10" fill="#7a7f90">起動毎に A レコード更新</text>
+
+<!-- VPC: AMI + Launch Template -->
+<use href="#ami" x="236" y="706" width="64" height="64"/>
+<text x="268" y="786" text-anchor="middle" font-size="11.5" font-weight="600" fill="#1f2430">汎用 AMI</text>
+<text x="268" y="799" text-anchor="middle" font-size="10" fill="#7a7f90">AL2023 / Packer</text>
+
+<use href="#lt" x="408" y="706" width="64" height="64"/>
+<text x="440" y="786" text-anchor="middle" font-size="11.5" font-weight="600" fill="#1f2430">Launch Template</text>
+<text x="440" y="799" text-anchor="middle" font-size="10" fill="#7a7f90">薄い LT (案 B)</text>
+<rect x="446" y="700" width="56" height="16" rx="4" fill="#F59E0B"/>
+<text x="474" y="712" text-anchor="middle" font-size="9" font-weight="700" fill="#fff">Phase 4</text>
+
+<!-- EC2 instance + inner processes -->
+<use href="#ec2" x="240" y="880" width="64" height="64"/>
+<text x="316" y="906" font-size="13" font-weight="700" fill="#1f2430">EC2 Spot Instance</text>
+<text x="316" y="924" font-size="10" fill="#7a7f90">EC2 Fleet — type:instant / capacity-optimized-prioritized</text>
+
+<use href="#launcher" x="272" y="972" width="56" height="56"/>
+<text x="346" y="996" font-size="12" font-weight="600" fill="#1f2430">universal-launcher.sh</text>
+<text x="346" y="1011" font-size="10" fill="#7a7f90">cloud-init から起動 / game_id でアダプタ分岐</text>
+
+<use href="#docker" x="272" y="1092" width="56" height="56"/>
+<text x="346" y="1116" font-size="12" font-weight="600" fill="#1f2430">Docker — ゲーム本体コンテナ</text>
+<text x="346" y="1131" font-size="10" fill="#7a7f90">itzg/minecraft-server 等 / entrypoint trap で graceful stop</text>
+
+<use href="#sidecar" x="272" y="1212" width="56" height="56"/>
+<text x="346" y="1236" font-size="12" font-weight="600" fill="#1f2430">sidecar コンテナ — idle 監視</text>
+<text x="346" y="1251" font-size="10" fill="#7a7f90">RCON / REST / Steam query → 0 人検知で Worker callback</text>
+
+<!-- Storage tiles -->
+<use href="#ebs" x="880" y="710" width="64" height="64"/>
+<text x="912" y="790" text-anchor="middle" font-size="11.5" font-weight="600" fill="#1f2430">EBS gp3 30GB</text>
+<text x="912" y="803" text-anchor="middle" font-size="10" fill="#7a7f90">world / save 永続化</text>
+
+<use href="#snap" x="880" y="870" width="64" height="64"/>
+<text x="912" y="950" text-anchor="middle" font-size="11.5" font-weight="600" fill="#1f2430">EBS Snapshot</text>
+<text x="912" y="963" text-anchor="middle" font-size="10" fill="#7a7f90">tag: game / Purpose=game-world</text>
+
+<use href="#dlm" x="880" y="1030" width="64" height="64"/>
+<text x="912" y="1110" text-anchor="middle" font-size="11.5" font-weight="600" fill="#1f2430">DLM ライフサイクル</text>
+<text x="912" y="1123" text-anchor="middle" font-size="10" fill="#7a7f90">snapshot 3 世代保持</text>
+<rect x="916" y="1024" width="56" height="16" rx="4" fill="#F59E0B"/>
+<text x="944" y="1036" text-anchor="middle" font-size="9" font-weight="700" fill="#fff">Phase 4</text>
+
+<use href="#s3" x="880" y="1200" width="64" height="64"/>
+<text x="912" y="1280" text-anchor="middle" font-size="11.5" font-weight="600" fill="#1f2430">S3: gs-game-configs</text>
+<text x="912" y="1293" text-anchor="middle" font-size="10" fill="#7a7f90">modpacks / configs / backups</text>
+
+<!-- Notification tiles -->
+<use href="#sns" x="1130" y="716" width="64" height="64"/>
+<text x="1162" y="796" text-anchor="middle" font-size="11.5" font-weight="600" fill="#1f2430">SNS: gs-alerts</text>
+<text x="1162" y="809" text-anchor="middle" font-size="10" fill="#7a7f90">通知集約トピック</text>
+
+<use href="#eb" x="1282" y="716" width="64" height="64"/>
+<text x="1314" y="796" text-anchor="middle" font-size="11.5" font-weight="600" fill="#1f2430">EventBridge</text>
+<text x="1314" y="809" text-anchor="middle" font-size="10" fill="#7a7f90">Spot中断 / DLM失敗</text>
+<rect x="1318" y="710" width="56" height="16" rx="4" fill="#F59E0B"/>
+<text x="1346" y="722" text-anchor="middle" font-size="9" font-weight="700" fill="#fff">Phase 4</text>
+
+<use href="#budget" x="1130" y="920" width="64" height="64"/>
+<text x="1162" y="1000" text-anchor="middle" font-size="11.5" font-weight="600" fill="#1f2430">AWS Budgets</text>
+<text x="1162" y="1013" text-anchor="middle" font-size="10" fill="#7a7f90">月次コスト上限 ($20)</text>
+
+<use href="#cw" x="1282" y="920" width="64" height="64"/>
+<text x="1314" y="1000" text-anchor="middle" font-size="11.5" font-weight="600" fill="#1f2430">CloudWatch Logs</text>
+<text x="1314" y="1013" text-anchor="middle" font-size="10" fill="#7a7f90">サーバー / sidecar ログ</text>
+
+<use href="#ssm" x="1130" y="1124" width="64" height="64"/>
+<text x="1162" y="1204" text-anchor="middle" font-size="11.5" font-weight="600" fill="#1f2430">SSM</text>
+<text x="1162" y="1217" text-anchor="middle" font-size="10" fill="#7a7f90">RunCommand / Parameter Store</text>
+
+<use href="#iam" x="1282" y="1124" width="64" height="64"/>
+<text x="1314" y="1204" text-anchor="middle" font-size="11.5" font-weight="600" fill="#1f2430">IAM</text>
+<text x="1314" y="1217" text-anchor="middle" font-size="10" fill="#7a7f90">Role / User / Access Key</text>
+
+<!-- ===================== LEGEND ===================== -->
+<rect x="120" y="1486" width="1320" height="44" rx="8" fill="#fff" stroke="#cdd2db"/>
+<text x="138" y="1505" font-size="10.5" font-weight="700" fill="#5b6470" letter-spacing="1">凡例</text>
+
+<line x1="138" y1="1518" x2="172" y2="1518" stroke="#2563EB" stroke-width="2.4" marker-end="url(#aBlue)"/>
+<text x="180" y="1522" font-size="11" fill="#3b3f52">制御 / API 呼び出し</text>
+
+<line x1="338" y1="1518" x2="372" y2="1518" stroke="#4D7C0F" stroke-width="2.4" marker-end="url(#aGreen)"/>
+<text x="380" y="1522" font-size="11" fill="#3b3f52">データ / ストレージ</text>
+
+<line x1="552" y1="1518" x2="586" y2="1518" stroke="#DB2777" stroke-width="2.4" stroke-dasharray="7 5" marker-end="url(#aPink)"/>
+<text x="594" y="1522" font-size="11" fill="#3b3f52">非同期通知 (SNS / sidecar callback)</text>
+
+<line x1="852" y1="1518" x2="886" y2="1518" stroke="#6B7280" stroke-width="2" stroke-dasharray="2 4" marker-end="url(#aGray)"/>
+<text x="894" y="1522" font-size="11" fill="#3b3f52">IAM / 認可</text>
+
+<rect x="1042" y="1510" width="56" height="16" rx="4" fill="#F59E0B"/>
+<text x="1070" y="1522" text-anchor="middle" font-size="9" font-weight="700" fill="#fff">Phase 4</text>
+<text x="1108" y="1522" font-size="11" fill="#3b3f52">未構築 — iac-migration-plan.md に沿って Terraform 化予定</text>
+
+</svg>
+</div>
+</body>
+</html>
