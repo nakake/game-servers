@@ -22,3 +22,8 @@ output "default_subnet_id" {
   description = "wrangler.toml の EC2_SUBNET_ID。ゲームサーバーを起動する subnet"
   value       = data.aws_subnet.default_a.id
 }
+
+output "s3_game_configs_bucket" {
+  description = "ゲーム設定 / launcher tarball 配布用 bucket 名 (wrangler.toml の LAUNCHER_TARBALL_S3_URI に対応)"
+  value       = aws_s3_bucket.gs_game_configs.id
+}
