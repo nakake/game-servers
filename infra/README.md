@@ -67,12 +67,17 @@ copy terraform.tfvars.example terraform.tfvars
 # terraform.tfvars を編集して worker_notification_url を埋める
 ```
 
-### 4. init + plan + apply
+### 4. init + import + plan + apply
 
 ```powershell
 terraform init
+
+# 既存の手動 SNS topic を取り込む。Tags 付き CreateTopic は既存 topic と
+# タグ不一致で 400 (InvalidParameter) になり、apply では自動取り込みできない
+terraform import aws_sns_topic.gs_alerts arn:aws:sns:ap-northeast-1:<account>:gs-alerts
+
 terraform plan -out=tfplan
-# diff を確認 — 既存 SNS topic は CreateTopic 冪等性で「import せず取り込み」になる想定
+# diff を確認
 terraform apply tfplan
 ```
 

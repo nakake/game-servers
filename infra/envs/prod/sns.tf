@@ -3,13 +3,20 @@
 # AWS Budgets / EventBridge / CloudWatch Alarm からの通知をここに集約し,
 # HTTPS subscription で Cloudflare Worker /aws/notification → Discord に流す。
 #
-# 既存の手動作成 topic がある場合, CreateTopic API は冪等なので最初の apply で
-# Terraform 管理下に取り込まれる (ARN は name+region+account から決まるため変わらない)。
+# 既存の手動作成 topic は `terraform import` で取り込む。CreateTopic API は
+# トピック自体には冪等だが, Tags 付き CreateTopic を「既存 topic かつタグ不一致」で
+# 呼ぶと InvalidParameter (Topic already exists with different tags) の 400 になり,
+# apply 任せの自動取り込みはできない (Step 0 で表面化)。取り込み手順:
+#   terraform import aws_sns_topic.gs_alerts arn:aws:sns:ap-northeast-1:<account>:gs-alerts
 
 data "aws_caller_identity" "current" {}
 
 resource "aws_sns_topic" "gs_alerts" {
   name = "gs-alerts"
+
+  # 手動作成時 (runbook-phase1-production.md §3.4) に設定済の display name。
+  # 明示しないと import 後の apply で null 化される。
+  display_name = "gs-alerts"
 
   tags = {
     Purpose = "aws-alerts-to-discord"
