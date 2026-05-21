@@ -18,6 +18,13 @@
 $ErrorActionPreference = 'Stop'
 
 # --- AWS 認証ブリッジ (docs/iac-migration-plan.md Step 0 の運用メモ参照) ---
+# export-credentials は失効間際のキャッシュをそのまま返すことがあり、その場合
+# terraform 実行中に ExpiredToken で落ちる。先に get-caller-identity を一度呼んで
+# CLI 側のセッション自動更新を促してから export する。
+try { aws sts get-caller-identity *> $null } catch { }
+if ($LASTEXITCODE -ne 0) {
+  Write-Warning "AWS CLI のセッションが無効です。再ログインしてから再実行してください。"
+}
 $cred = aws configure export-credentials --format process | ConvertFrom-Json
 $env:AWS_ACCESS_KEY_ID     = $cred.AccessKeyId
 $env:AWS_SECRET_ACCESS_KEY = $cred.SecretAccessKey
