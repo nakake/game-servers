@@ -127,6 +127,10 @@ data "aws_iam_policy_document" "gs_worker_caller" {
       "ec2:DescribeVolumes",
       "ec2:DescribeSnapshots",
       "ec2:CreateSnapshot",
+      # DeleteSnapshot は Cron の世代管理 (Worker handlers/snapshot-retention.ts) が
+      # generations を超えた古い game-world snapshot を消すために使う。DLM は Worker が
+      # 作る snapshot を管理できないため Worker 側で世代管理する (Step 6)。
+      "ec2:DeleteSnapshot",
       "ec2:CreateTags",
       "ec2:DeleteVolume",
     ]

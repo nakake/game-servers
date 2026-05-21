@@ -435,9 +435,14 @@ aws ec2 describe-volumes `
 aws ec2 delete-volume --volume-id vol-xxxxxxxx --region ap-northeast-1
 ```
 
-### snapshot 世代管理 (Phase 4 で DLM 化)
+### snapshot 世代管理
 
-現状は累積するので、定期的に古いものを手動削除:
+iac-migration-plan.md Step 6 で **Worker の Cron (`handlers/snapshot-retention.ts`、5 分間隔)** が
+`registry.json` の `snapshot.generations` 世代 (ATM11 は 3) を残して古い snapshot を自動削除する
+ようにした (Worker deploy 後に有効)。deploy 後は手動削除は不要。当初は DLM 化を予定していたが、
+DLM は Worker が作成した snapshot を世代管理できないため Worker 側で実装した (経緯は同 Step 6)。
+
+以下は snapshot 一覧の確認、および自動削除が止まっているときの手動フォールバック:
 
 ```powershell
 aws ec2 describe-snapshots `
@@ -449,8 +454,6 @@ aws ec2 describe-snapshots `
 
 aws ec2 delete-snapshot --snapshot-id snap-xxxxxxxx --region ap-northeast-1
 ```
-
-3 世代より古いものを削除する運用。
 
 ---
 

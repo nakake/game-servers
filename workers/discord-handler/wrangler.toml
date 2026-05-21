@@ -35,9 +35,12 @@ SNS_ALLOWED_TOPIC_ARN = "arn:aws:sns:ap-northeast-1:123456789012:gs-alerts"
 binding = "SERVER_STATE"
 id = "<YOUR_KV_SERVER_STATE_ID>"
 
-# Cron Trigger — `/stop` が予約した「snapshot 完成後に削除する volume」を回収する。
-# snapshot 完成は数分かかり Worker の 1 invocation では待ち切れないため、stop.ts は KV に
-# 予約を書くだけにし、この cron (handlers/cleanup.ts) が完成を確認して volume を削除する。
+# Cron Trigger — 5 分ごとに 2 つの後追い処理を回す:
+#   - handlers/cleanup.ts           : `/stop` が予約した「snapshot 完成後に削除する volume」を回収。
+#     snapshot 完成は数分かかり Worker の 1 invocation では待ち切れないため、stop.ts は KV に
+#     予約を書くだけにし、この cron が完成を確認して volume を削除する。
+#   - handlers/snapshot-retention.ts: game-world snapshot を registry の generations 世代に絞る
+#     (DLM 不採用、docs/iac-migration-plan.md Step 6)。
 [triggers]
 crons = ["*/5 * * * *"]
 #

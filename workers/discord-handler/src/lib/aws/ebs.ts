@@ -263,6 +263,21 @@ export async function createSnapshot(
   return rawSnapshotToDetail(parsed.CreateSnapshotResponse);
 }
 
+// snapshot を削除する。世代管理 (handlers/snapshot-retention.ts) が registry の
+// snapshot.generations を超えた古い completed snapshot を消すのに使う。当初は AWS DLM に
+// 委譲する想定だったが、DLM の EBS スナップショット管理ポリシーは DLM 自身が作成した
+// snapshot しか保持・削除できず、Worker が CreateSnapshot で作る snapshot は管理対象外の
+// ため Worker 側で世代管理する (docs/iac-migration-plan.md Step 6)。
+// DeleteSnapshot のレスポンスは <return>true</return> だけなのでパース不要 (deleteVolume と同じ)。
+export async function deleteSnapshot(client: AwsApiClient, snapshotId: string): Promise<void> {
+  await client.queryRequest({
+    service: 'ec2',
+    action: 'DeleteSnapshot',
+    version: EC2_API_VERSION,
+    params: { SnapshotId: snapshotId },
+  });
+}
+
 // ----------------------------------------------------------------------
 // DescribeSnapshots
 // ----------------------------------------------------------------------

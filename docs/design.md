@@ -44,7 +44,7 @@ Discord コマンドから起動・停止できる、複数ゲーム対応のス
            ├─ sidecar: idle 検知 → Workers エンドポイント呼出
            └─ EBS gp3 (game別 snapshot から復元)
 
-        [EBS Snapshot] tag: game=<id>, DLM で 3 世代
+        [EBS Snapshot] tag: Game=<id>, Worker Cron で 3 世代
         [S3] modpacks/<game>/, saves/<game>/ 週次バックアップ
         [CloudWatch Logs] サーバー/sidecar ログ
 ```
@@ -57,7 +57,7 @@ Discord コマンドから起動・停止できる、複数ゲーム対応のス
 | 状態ストア | ゲーム定義、稼働状態 | Workers KV |
 | 認証 | Discord 署名検証、AWS API 署名 | Workers 内 (discord-interactions, aws4fetch) |
 | 実行プレーン | ゲームプロセス、データ永続化 | AWS EC2 + EBS |
-| バックアップ | 短期世代管理 / 長期保管 | DLM (EBS) + S3 |
+| バックアップ | 短期世代管理 / 長期保管 | Worker Cron (EBS snapshot) + S3 |
 
 ---
 
@@ -316,39 +316,29 @@ WORKERS_URL="${workers_url}"
 
 ### 5.5 Snapshot ライフサイクル
 
-Data Lifecycle Manager (DLM) のポリシー:
+ワールド world は `/stop` のたびに Worker が CreateSnapshot で snapshot を取り (§7.2)、
+直近 `generations` 世代 (registry.json `snapshot.generations`、ATM11 は 3) だけを残す。
 
-```hcl
-resource "aws_dlm_lifecycle_policy" "game_world" {
-  policy_details {
-    resource_types = ["VOLUME"]
-    target_tags    = { Purpose = "game-world" }
+**世代管理は Worker 側で行う。DLM (Data Lifecycle Manager) は使わない。** DLM の EBS
+スナップショット管理ポリシーは「DLM 自身がスケジュールで作成した snapshot」しか保持・削除
+できず、Worker が CreateSnapshot で作る snapshot は `target_tags` が一致しても管理対象外に
+なる。当初は DLM に委譲する設計だったが、DLM には「外部が作成した snapshot を世代管理する」
+機能が存在しないため断念した (経緯は `docs/iac-migration-plan.md` Step 6)。
 
-    schedule {
-      name = "every-stop-3gen"
-      create_rule {
-        # 手動 trigger (停止 Lambda から CreateSnapshot)
-      }
-      retain_rule { count = 3 }
-      copy_tags = true
-    }
-
-    schedule {
-      name = "weekly-s3-archive"
-      cron_expression = "cron(0 19 ? * SUN *)"  # JST 月 04:00
-      # S3 移行はカスタム Lambda で実装
-    }
-  }
-}
-```
+- **作成**: Worker `/stop` フローが `/dev/sdf` の data volume を CreateSnapshot。
+  tag: `Game=<id>` / `Purpose=game-world` / `SnapshotType=game-world-data` (snapshot 専用マーカー)。
+- **世代管理**: Worker の Cron (`handlers/snapshot-retention.ts`、5 分間隔) が Game ごとに
+  completed snapshot を startTime 降順に並べ、`generations` 本目より古いものを DeleteSnapshot。
+  pending (= `/stop` 直後の最新分) は次 tick へ繰り越し、error は手動対応に倒す。
+- **週次 S3 バックアップ** (`weekly_s3_backup`): 長期保管用。Phase 3 以降にカスタム Lambda /
+  Worker で別途実装する (本節のスコープ外)。
 
 ### 5.6 IAM
 
 | ロール | 用途 | 主要権限 |
 |---|---|---|
-| `gs-worker-caller` | Workers から AssumeRole / 直接利用 | EC2 RunInstances, EBS CreateSnapshot, S3 GetObject |
+| `gs-worker-caller` | Workers から AssumeRole / 直接利用 | EC2 RunInstances, EBS Create/DeleteSnapshot, S3 GetObject |
 | `gs-ec2-instance-role` | EC2 が引き受け | S3 Get/Put (configs, backups), CloudWatch Logs, SSM ParameterGet |
-| `gs-dlm-role` | DLM が引き受け | EBS Snapshot 作成・削除 |
 
 Phase 1 は Access Key、Phase 2 で Cloudflare Workers OIDC → AssumeRole に切替。
 
@@ -533,7 +523,7 @@ F:/project/game_servers/
      │     mcrcon → stop
      └─ java exit → container Stopped
    ▼
-[DLM] 3 世代超過分を自動削除
+[Worker Cron] 3 世代超過分を自動削除 (handlers/snapshot-retention.ts、§5.5)
 ```
 
 ゲーム別の graceful stop コマンドは container 内 `entrypoint.sh` の trap に閉じる (mc: rcon `save-all && stop`, terraria: `/exit` 等)。Worker は **常に `docker stop`** を発火するだけで、ゲーム固有のコマンドを知る必要がない。
@@ -638,7 +628,7 @@ F:/project/game_servers/
 
 - [ ] sidecar コンテナ実装 (TypeScript / Docker)
 - [ ] idle 検知 → Workers POST → 停止フロー
-- [ ] DLM ポリシー Terraform 化
+- [ ] snapshot 世代管理 (Worker Cron、§5.5 — DLM は不採用)
 - [ ] Workers cron フォールバック
 
 ゴール: 放置で勝手に停止する

@@ -49,6 +49,7 @@ export {
   describeVolumesByTag,
   describeVolumeById,
   createSnapshot,
+  deleteSnapshot,
   deleteVolume,
   describeSnapshotsByTag,
   describeSnapshotById,
