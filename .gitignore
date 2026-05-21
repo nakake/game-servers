@@ -59,6 +59,9 @@ coverage/
 *.tfstate.*
 *.tfvars
 !*.tfvars.example
+# 保存済み plan ファイル (機微な値を含みうる)
+tfplan
+*.tfplan
 crash.log
 crash.*.log
 override.tf
