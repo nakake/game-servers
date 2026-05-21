@@ -1,18 +1,26 @@
 // AWS EBS ラッパ (Query Protocol + XML)。
 //
-// Phase 1 hardcode で使う最小機能:
-//   - describeVolumesByTag    : `/stop` で attached volume を identify する
-//   - createSnapshot          : `/stop` で game-world volume の snapshot を取る (async fire-and-forget)
-//   - describeSnapshotsByTag  : `/start` で latest completed snapshot を取得
-//   - getLatestCompletedSnapshot : 上の薄いラッパ
+// 機能:
+//   - describeVolumesByTag      : `/stop` で attached volume を identify する
+//   - describeVolumeById        : volume を id 指定で 1 件取得
+//   - createSnapshot            : `/stop` で game-world volume の snapshot を取る
+//   - deleteVolume              : `/stop` で snapshot 完成後に旧 data volume を削除する
+//   - describeSnapshotsByTag    : tag で snapshot を検索
+//   - describeSnapshotById      : snapshot を id 指定で 1 件取得
+//   - getLatestCompletedSnapshot: 最新の completed snapshot を取得 (フォールバック用)
+//   - getLatestSnapshot         : 最新の snapshot を state 問わず取得 (`/start` の主経路)
+//   - waitForSnapshotCompleted  : snapshot が completed になるまで polling
 //
 // Snapshot は CreateSnapshot 直後に status=pending で返り、AWS 側で async に completed まで
-// 進む。Worker からは完了を待たず terminate に進めて問題ない (次回 /start 時点で completed
-// な最新を取り出す)。Worker の wall-clock 制限 (30s) を考えるとこの設計が現実的。
+// 進む。完成まで数分かかり Worker の 1 invocation では待ち切れないため、`/stop` は volume の
+// 削除を Cron (handlers/cleanup.ts) に委譲する。Cron は describeSnapshotById で completed を
+// 確認してから deleteVolume する。`/start` 側は、まだ completed になっていない最新 snapshot を
+// 掴んだ場合に限り短時間 waitForSnapshotCompleted する (一つ前への巻き戻しを防ぐ)。
 
 import { XMLParser } from 'fast-xml-parser';
 
 import type { AwsApiClient } from './client.js';
+import { AwsApiError } from './errors.js';
 
 const EC2_API_VERSION = '2016-11-15';
 
@@ -98,6 +106,23 @@ interface RawDescribeVolumesResponse {
   };
 }
 
+function rawVolumeToDetail(v: RawVolumeItem): VolumeDetail {
+  return {
+    volumeId: v.volumeId,
+    state: v.status,
+    size: parseInt(v.size, 10),
+    ...(v.snapshotId !== undefined && v.snapshotId !== '' ? { snapshotId: v.snapshotId } : {}),
+    availabilityZone: v.availabilityZone,
+    attachments: (v.attachmentSet?.item ?? []).map((a) => ({
+      instanceId: a.instanceId,
+      device: a.device,
+      state: a.status,
+      deleteOnTermination: a.deleteOnTermination === 'true',
+    })),
+    tags: tagsToMap(v.tagSet?.item),
+  };
+}
+
 export async function describeVolumesByTag(
   client: AwsApiClient,
   tags: Record<string, string>,
@@ -123,20 +148,34 @@ export async function describeVolumesByTag(
 
   const parsed = xmlParser.parse(xml) as RawDescribeVolumesResponse;
   const items = parsed.DescribeVolumesResponse.volumeSet?.item ?? [];
-  return items.map((v) => ({
-    volumeId: v.volumeId,
-    state: v.status,
-    size: parseInt(v.size, 10),
-    ...(v.snapshotId !== undefined && v.snapshotId !== '' ? { snapshotId: v.snapshotId } : {}),
-    availabilityZone: v.availabilityZone,
-    attachments: (v.attachmentSet?.item ?? []).map((a) => ({
-      instanceId: a.instanceId,
-      device: a.device,
-      state: a.status,
-      deleteOnTermination: a.deleteOnTermination === 'true',
-    })),
-    tags: tagsToMap(v.tagSet?.item),
-  }));
+  return items.map(rawVolumeToDetail);
+}
+
+// volume を id 指定で 1 件取得する。存在しなければ undefined。
+export async function describeVolumeById(
+  client: AwsApiClient,
+  volumeId: string,
+): Promise<VolumeDetail | undefined> {
+  const xml = await client.queryRequest({
+    service: 'ec2',
+    action: 'DescribeVolumes',
+    version: EC2_API_VERSION,
+    params: { 'VolumeId.1': volumeId },
+  });
+  const parsed = xmlParser.parse(xml) as RawDescribeVolumesResponse;
+  const item = (parsed.DescribeVolumesResponse.volumeSet?.item ?? [])[0];
+  return item !== undefined ? rawVolumeToDetail(item) : undefined;
+}
+
+// volume を削除する。`/stop` が snapshot 完成を確認した後、課金されつづける旧 data volume
+// を消すのに使う。DeleteVolume のレスポンスは <return>true</return> だけなのでパース不要。
+export async function deleteVolume(client: AwsApiClient, volumeId: string): Promise<void> {
+  await client.queryRequest({
+    service: 'ec2',
+    action: 'DeleteVolume',
+    version: EC2_API_VERSION,
+    params: { VolumeId: volumeId },
+  });
 }
 
 // ----------------------------------------------------------------------
@@ -258,6 +297,23 @@ export async function describeSnapshotsByTag(
   return items.map(rawSnapshotToDetail);
 }
 
+// snapshot を id 指定で 1 件取得する。存在しなければ undefined。
+// waitForSnapshotCompleted の polling 用。
+export async function describeSnapshotById(
+  client: AwsApiClient,
+  snapshotId: string,
+): Promise<SnapshotDetail | undefined> {
+  const xml = await client.queryRequest({
+    service: 'ec2',
+    action: 'DescribeSnapshots',
+    version: EC2_API_VERSION,
+    params: { 'SnapshotId.1': snapshotId },
+  });
+  const parsed = xmlParser.parse(xml) as RawDescribeSnapshotsResponse;
+  const item = (parsed.DescribeSnapshotsResponse.snapshotSet?.item ?? [])[0];
+  return item !== undefined ? rawSnapshotToDetail(item) : undefined;
+}
+
 // game-world データ volume の snapshot だけに付与するマーカー tag。
 //
 // RunInstances の TagSpecification(ResourceType=volume) は root volume にも tag を
@@ -267,16 +323,15 @@ export async function describeSnapshotsByTag(
 //
 // このマーカーは CreateSnapshot 時にのみ付与する snapshot 専用 tag。volume には
 // 一切付かないので root クローンが誤って持つことはない。/start の復元 (getLatest-
-// CompletedSnapshot) はこの tag を持つ snapshot だけを対象にする。
+// Snapshot / getLatestCompletedSnapshot) はこの tag を持つ snapshot だけを対象にする。
 export const GAME_WORLD_SNAPSHOT_TAG_KEY = 'SnapshotType';
 export const GAME_WORLD_SNAPSHOT_TAG_VALUE = 'game-world-data';
 
 // startTime 降順で最新の completed snapshot を返す。なければ undefined。
 //
 // root volume クローンを誤って掴まないよう、game-world data マーカー tag
-// (SnapshotType=game-world-data) を必須フィルタとして強制する。マーカー付き snapshot
-// が 1 つも無ければ undefined を返し、呼び出し側 (start.ts) は env seed
-// (ATM11_SNAPSHOT_ID) にフォールバックする。
+// (SnapshotType=game-world-data) を必須フィルタとして強制する。`/start` で最新 snapshot が
+// pending / error 等のときのフォールバック先として使う。
 export async function getLatestCompletedSnapshot(
   client: AwsApiClient,
   tags: Record<string, string>,
@@ -290,4 +345,72 @@ export async function getLatestCompletedSnapshot(
   // startTime は ISO8601、文字列比較で正しい順序になる
   all.sort((a, b) => (a.startTime < b.startTime ? 1 : -1));
   return all[0];
+}
+
+// startTime 降順で最新の snapshot を state 問わず返す。なければ undefined。
+//
+// `/start` の復元元決定の主経路。getLatestCompletedSnapshot と同じく game-world data
+// マーカー tag を必須にするが、状態フィルタを掛けないので pending の snapshot も対象に
+// なる。呼び出し側 (start.ts) は返ってきた state を見て completed ならそのまま使用、
+// pending なら waitForSnapshotCompleted、それ以外なら getLatestCompletedSnapshot に
+// フォールバックする。
+export async function getLatestSnapshot(
+  client: AwsApiClient,
+  tags: Record<string, string>,
+): Promise<SnapshotDetail | undefined> {
+  const filterTags = {
+    ...tags,
+    [GAME_WORLD_SNAPSHOT_TAG_KEY]: GAME_WORLD_SNAPSHOT_TAG_VALUE,
+  };
+  const all = await describeSnapshotsByTag(client, filterTags);
+  if (all.length === 0) return undefined;
+  all.sort((a, b) => (a.startTime < b.startTime ? 1 : -1));
+  return all[0];
+}
+
+// ----------------------------------------------------------------------
+// waitForSnapshotCompleted
+// ----------------------------------------------------------------------
+
+export interface WaitForSnapshotCompletedOptions {
+  snapshotId: string;
+  // ポーリング間隔 (ms)。デフォルト 5000。
+  pollIntervalMs?: number;
+  // 全体タイムアウト (ms)。デフォルト 300_000 = 5 分。
+  timeoutMs?: number;
+}
+
+// snapshot が state=completed になるまで待つ。error state に落ちたら throw、timeout でも throw。
+export async function waitForSnapshotCompleted(
+  client: AwsApiClient,
+  options: WaitForSnapshotCompletedOptions,
+): Promise<SnapshotDetail> {
+  const interval = options.pollIntervalMs ?? 5000;
+  const timeout = options.timeoutMs ?? 300_000;
+  const deadline = Date.now() + timeout;
+
+  while (Date.now() < deadline) {
+    let snap: SnapshotDetail | undefined;
+    try {
+      snap = await describeSnapshotById(client, options.snapshotId);
+    } catch (err) {
+      // CreateSnapshot 直後は eventual consistency で InvalidSnapshot.NotFound が
+      // 返ることがある。terminal error ではないので polling を継続する。
+      if (!(err instanceof AwsApiError && err.awsErrorCode === 'InvalidSnapshot.NotFound')) {
+        throw err;
+      }
+    }
+    if (snap !== undefined) {
+      if (snap.state === 'completed') return snap;
+      if (snap.state === 'error') {
+        throw new Error(
+          `waitForSnapshotCompleted: snapshot entered "error" state (snapshotId=${options.snapshotId})`,
+        );
+      }
+    }
+    await new Promise((resolve) => setTimeout(resolve, interval));
+  }
+  throw new Error(
+    `waitForSnapshotCompleted: timed out after ${timeout}ms (snapshotId=${options.snapshotId})`,
+  );
 }

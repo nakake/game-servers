@@ -3,8 +3,10 @@
 // ADR 0002 に基づき: SSM Run Command で `docker stop --time=60` → container 内 trap が
 // rcon save-all + stop → java exit → docker Stopped → EC2 terminate。
 //
-// Phase 1 hardcode: EBS snapshot 作成は EBS lib 未実装のため skip。`/start` 時に
-// snapshotId から復元する経路だけ動かす (上書き snapshot は手動 or 次フェーズ)。
+// terminate 後は data volume (/dev/sdf) の snapshot を取る。その volume の削除は Cron に
+// 委譲する: snapshot 完成は数分かかり 1 invocation では待ち切れないため、ここでは KV に
+// 削除予約を書くだけにし、Cron (handlers/cleanup.ts) が snapshot completed を確認して消す。
+// available volume を残すと課金が続くので、停止のたびに (Cron 経由で) 掃除する。
 
 import {
   AwsApiClient,
@@ -17,6 +19,7 @@ import {
   GAME_WORLD_SNAPSHOT_TAG_KEY,
   GAME_WORLD_SNAPSHOT_TAG_VALUE,
 } from '../../lib/aws/index.js';
+import { storePendingCleanup } from '../../lib/state/pending-cleanup.js';
 import { CloudflareDnsClient } from '../../lib/cloudflare/index.js';
 import { DiscordFollowUpClient } from '../../lib/discord/follow-up.js';
 import {
@@ -189,10 +192,37 @@ async function executeStop(gameId: string, interaction: Interaction, env: Env): 
       console.error('DNS clear failed:', err);
     }
 
+    // 7. 旧 data volume の削除は Cron に委譲する。
+    //    snapshot 完成は数分かかり、Worker の 1 invocation では待ち切れない (実行時間制限で
+    //    途中 kill される)。ここでは「snapshot 完成後に消す volume」を KV に記録するだけにし、
+    //    Cron Trigger (handlers/cleanup.ts) が completed を確認して削除する。
+    let volumeNote = '';
+    if (snapshotIdForNotice !== undefined && liveVolume !== undefined) {
+      if (env.SERVER_STATE !== undefined) {
+        try {
+          await storePendingCleanup(env.SERVER_STATE, {
+            gameId,
+            volumeId: liveVolume.volumeId,
+            snapshotId: snapshotIdForNotice,
+            requestedAt: new Date().toISOString(),
+          });
+          volumeNote = `\n旧 volume \`${liveVolume.volumeId}\` は snapshot 完成後に自動削除されます`;
+        } catch (err) {
+          console.error('storePendingCleanup failed:', err);
+          volumeNote =
+            `\n⚠️ 旧 volume \`${liveVolume.volumeId}\` の自動削除予約に失敗しました (手動削除が必要)`;
+        }
+      } else {
+        volumeNote =
+          `\n⚠️ 旧 volume \`${liveVolume.volumeId}\` は手動削除が必要です ` +
+          `(SERVER_STATE KV 未設定で Cron が拾えない)`;
+      }
+    }
+
     const snapshotNote = snapshotIdForNotice !== undefined
-      ? `\nsnapshot: \`${snapshotIdForNotice}\` (進行中、次回 /start で使用)`
+      ? `\nsnapshot: \`${snapshotIdForNotice}\` (次回 /start で使用)`
       : '';
-    await safeEdit(followUp, `✅ ${game.discord.stop_message}${snapshotNote}`);
+    await safeEdit(followUp, `✅ ${game.discord.stop_message}${snapshotNote}${volumeNote}`);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     await safeEdit(followUp, `❌ \`/stop ${gameId}\` failed: ${msg.slice(0, 500)}`);

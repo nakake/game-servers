@@ -5,6 +5,7 @@
 
 import { handleAdminDockerStop } from './handlers/admin.js';
 import { handleAwsNotification } from './handlers/aws-notification.js';
+import { handleVolumeCleanup } from './handlers/cleanup.js';
 import { handleDiscordInteraction } from './handlers/discord.js';
 import type { Env } from './env.js';
 
@@ -45,5 +46,11 @@ export default {
       status: 404,
       headers: { 'content-type': 'text/plain; charset=utf-8' },
     });
+  },
+
+  // Cron Trigger (wrangler.toml [triggers] crons)。`/stop` が予約した
+  // 「snapshot 完成後に削除する volume」を回収する。
+  async scheduled(_controller: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
+    ctx.waitUntil(handleVolumeCleanup(env));
   },
 } satisfies ExportedHandler<Env>;

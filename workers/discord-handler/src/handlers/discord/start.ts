@@ -9,8 +9,10 @@ import {
   AwsApiClient,
   describeInstancesByTag,
   getLatestCompletedSnapshot,
+  getLatestSnapshot,
   runInstances,
   waitForInstanceRunning,
+  waitForSnapshotCompleted,
 } from '../../lib/aws/index.js';
 import { CloudflareDnsClient } from '../../lib/cloudflare/index.js';
 import { DiscordFollowUpClient } from '../../lib/discord/follow-up.js';
@@ -92,15 +94,54 @@ async function executeStart(gameId: string, interaction: Interaction, env: Env):
       return;
     }
 
-    // 2. latest completed snapshot を取得 (なければ env seed = Phase 0 snapshot)
-    const latest = await getLatestCompletedSnapshot(ec2, {
-      Game: gameId,
-      Purpose: 'game-world',
-    });
-    const snapshotId = latest?.snapshotId ?? env.ATM11_SNAPSHOT_ID;
-    const snapshotNote = latest !== undefined
-      ? `latest \`${snapshotId}\` (${latest.startTime})`
-      : `env seed \`${snapshotId}\``;
+    // 2. 復元元 snapshot を決める。最新の game-world snapshot を state 問わず取得し:
+    //      completed → そのまま使用
+    //      pending   → completed まで待機 (/stop と /start が重なった時の保険。通常は
+    //                  /stop 側が完成を見届けてから終わるのでここは通らない)
+    //      その他    → 最新の completed snapshot にフォールバック
+    //    snapshot が 1 つも無ければ env seed (= 初回起動時の Phase 0 snapshot)。
+    const snapshotTags = { Game: gameId, Purpose: 'game-world' };
+    const latest = await getLatestSnapshot(ec2, snapshotTags);
+    let snapshotId: string;
+    let snapshotNote: string;
+    if (latest === undefined) {
+      snapshotId = env.ATM11_SNAPSHOT_ID;
+      snapshotNote = `env seed \`${snapshotId}\` (初回起動)`;
+    } else if (latest.state === 'completed') {
+      snapshotId = latest.snapshotId;
+      snapshotNote = `latest \`${snapshotId}\` (${latest.startTime})`;
+    } else if (latest.state === 'pending') {
+      // 直近の /stop snapshot がまだ完成していない。一つ前に巻き戻さず完成を待つが、
+      // Worker の実行時間制限があるので最大 120s で打ち切り、超えたら最新 completed に
+      // フォールバックする (通常は /stop からしばらく経ってから /start するので待ちは発生しない)。
+      await safeEdit(
+        followUp,
+        `⏳ 直近の停止 snapshot \`${latest.snapshotId}\` を完成待ち中… (${latest.progress})`,
+      );
+      try {
+        await waitForSnapshotCompleted(ec2, {
+          snapshotId: latest.snapshotId,
+          timeoutMs: 120_000,
+          pollIntervalMs: 5000,
+        });
+        snapshotId = latest.snapshotId;
+        snapshotNote = `latest \`${snapshotId}\` (完成待ち後)`;
+      } catch (err) {
+        console.error('waitForSnapshotCompleted failed, falling back:', err);
+        const completed = await getLatestCompletedSnapshot(ec2, snapshotTags);
+        snapshotId = completed?.snapshotId ?? env.ATM11_SNAPSHOT_ID;
+        snapshotNote = completed !== undefined
+          ? `fallback latest completed \`${snapshotId}\``
+          : `env seed \`${snapshotId}\``;
+      }
+    } else {
+      // error / recoverable / recovering — 最新の completed にフォールバック。
+      const completed = await getLatestCompletedSnapshot(ec2, snapshotTags);
+      snapshotId = completed?.snapshotId ?? env.ATM11_SNAPSHOT_ID;
+      snapshotNote = completed !== undefined
+        ? `latest completed \`${snapshotId}\` (最新 snapshot は ${latest.state})`
+        : `env seed \`${snapshotId}\``;
+    }
     await safeEdit(followUp, `⏳ snapshot 確定: ${snapshotNote}、EC2 起動中…`);
 
     // 3. user-data 生成 (EBS mount → S3 から launcher tarball → SSM から RCON pw → docker build/run)

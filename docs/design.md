@@ -1,6 +1,6 @@
 # Game Servers — 設計ドキュメント
 
-最終更新: 2026-05-17 (rev 2: §4.6 AWS 通知の Discord 集約を追加)
+最終更新: 2026-05-21 (rev 3: §10 に Phase 1 進捗を反映)
 
 ## 1. 目的とスコープ
 
@@ -610,17 +610,21 @@ F:/project/game_servers/
 
 ゴール: インスタンスタイプと EBS サイズの確定 — **達成** (詳細は `docs/phase0-results.md`)
 
-### Phase 1: Workers 最小実装 (2〜3 日)
+### Phase 1: Workers 最小実装 (2〜3 日) — 完了 (2026-05-21)
 
-- [ ] Cloudflare アカウント、Wrangler セットアップ
-- [ ] Discord アプリ登録、Bot Token 取得
-- [ ] Worker で `/ping` 応答
-- [ ] Worker から手動 EC2 起動 / 停止 (`/start atm11` ハードコード)
-- [ ] Cloudflare DNS API で A レコード更新
-- [ ] Worker `/aws/notification` 実装 (SNS subscription confirm + Discord 整形)
-- [ ] 手動で SNS topic 作成 → Budget アラートを Discord に切替
+- [x] Cloudflare アカウント、Wrangler セットアップ
+- [x] Discord アプリ登録、Bot Token 取得
+- [x] Worker で `/ping` 応答
+- [x] Worker から手動 EC2 起動 / 停止 (`/start atm11` ハードコード)
+- [x] Cloudflare DNS API で A レコード更新
+- [x] Worker `/aws/notification` 実装 (SNS subscription confirm + Discord 整形)
+- [x] 手動で SNS topic 作成 → Budget アラートを Discord に切替
 
 ゴール: Discord から ATM11 を上げ下げできる、Budget 通知も Discord に届く
+
+> `/start` → `/stop` → 再 `/start` で world 永続性まで実機検証済 (2026-05-21)。EBS snapshot
+> 引き継ぎ (pending 完成待ち + Cron での volume 回収) と Budget→SNS→Discord 通知も実機確認済で
+> Phase 1 のゴールを達成。残りは月コストの実測のみ (§8 試算 ¥685/月 の検証)。
 
 ### Phase 2: ゲーム抽象化 (2 日)
 

@@ -28,16 +28,19 @@ LAUNCHER_TARBALL_S3_URI = "s3://gs-game-configs/launcher/atm11.tar.gz"
 SNS_ALLOWED_TOPIC_ARN = "arn:aws:sns:ap-northeast-1:123456789012:gs-alerts"
 
 # ---- SERVER_STATE KV ----
-# /start 〜 ready 通知の間、interaction の文脈 (token / userId) を一時保存する。
-# 有効化手順:
-#   1. `wrangler kv namespace create SERVER_STATE` を実行
-#   2. 出力された id を下の "TBD" に貼り、この 3 行を uncomment
-#   3. `pnpm deploy`
-# 未設定でも動くが、その場合 ready 通知は webhook のみ (元メッセージ編集 + mention は skip)。
-#
+# 2 用途で使う:
+#   - pending-ready   : /start 〜 ready 通知の間、interaction の文脈 (token / userId) を保持
+#   - pending-cleanup : /stop が予約した「snapshot 完成後に削除する volume」を保持 (Cron が回収)
+# 別環境に作り直すときは `wrangler kv namespace create SERVER_STATE` で発行した id に差し替える。
 [[kv_namespaces]]
 binding = "SERVER_STATE"
 id = "<YOUR_KV_SERVER_STATE_ID>"
+
+# Cron Trigger — `/stop` が予約した「snapshot 完成後に削除する volume」を回収する。
+# snapshot 完成は数分かかり Worker の 1 invocation では待ち切れないため、stop.ts は KV に
+# 予約を書くだけにし、この cron (handlers/cleanup.ts) が完成を確認して volume を削除する。
+[triggers]
+crons = ["*/5 * * * *"]
 #
 # ---- 今は使わない (Phase 2 以降で実体作成して uncomment) ----
 #
@@ -45,8 +48,8 @@ id = "<YOUR_KV_SERVER_STATE_ID>"
 # binding = "GAME_REGISTRY"
 # id = "TBD"           # `wrangler kv namespace create GAME_REGISTRY` で発行された ID
 #
-# [triggers]
-# crons = ["0 * * * *"]  # 1時間ごとに idle フォールバック (Phase 3)
+# idle 検知フォールバック (Phase 3) を足すときは上の crons 配列にエントリを追加する:
+#   crons = ["*/5 * * * *", "0 * * * *"]
 #
 # シークレットは wrangler secret put NAME で投入する (このファイルには書かない):
 #   - DISCORD_PUBLIC_KEY      ed25519 verification

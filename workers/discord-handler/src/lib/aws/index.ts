@@ -47,9 +47,14 @@ export type {
 
 export {
   describeVolumesByTag,
+  describeVolumeById,
   createSnapshot,
+  deleteVolume,
   describeSnapshotsByTag,
+  describeSnapshotById,
   getLatestCompletedSnapshot,
+  getLatestSnapshot,
+  waitForSnapshotCompleted,
   GAME_WORLD_SNAPSHOT_TAG_KEY,
   GAME_WORLD_SNAPSHOT_TAG_VALUE,
 } from './ebs.js';
@@ -58,4 +63,5 @@ export type {
   VolumeAttachment,
   CreateSnapshotInput,
   SnapshotDetail,
+  WaitForSnapshotCompletedOptions,
 } from './ebs.js';
