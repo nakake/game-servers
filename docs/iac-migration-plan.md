@@ -109,12 +109,16 @@ Worker コード変更: なし。
 
 Worker コード変更: なし。Worker secrets 変更: なし (Access Key rotation を見送ったため)。
 
-### Step 2: Network の import
+### Step 2: Network の import  *(完了 2026-05-21)*
 
-- [ ] `data "aws_vpc" "default"` で default VPC を参照
-- [ ] `data "aws_subnet" "default_a"` 等で default subnet を参照
-- [ ] `aws_security_group.game_server` を import (`sg-00cb1cc5269f27870`)
-- [ ] SG の ingress / egress を `aws_security_group_rule` で個別管理に分解 (port は registry.json に依存させたいので Step 5 と一緒に整理してもよい)
+- [x] `data "aws_vpc" "default"` で default VPC を参照 (`vpc-0b9c1a51710d5d5ce`、import せず data 参照)
+- [x] `data "aws_subnet" "default_a"` で default subnet を参照 (`<YOUR_SUBNET_ID>`、ap-northeast-1a)
+- [x] `aws_security_group.game_server` を import (`sg-00cb1cc5269f27870` = `gs-phase0-sg`)
+- [x] SG の ingress / egress を個別 rule リソースに分解。**当初案の `aws_security_group_rule` ではなく provider v5 系の新リソース `aws_vpc_security_group_ingress_rule` / `_egress_rule` を採用** (rule 単位の description `Admin SSH` / `Minecraft` と tag を保持でき、HashiCorp が新規はこちらを推奨)。ingress 2 本 (`ssh_admin` `sgr-0a8c…`, `minecraft` `sgr-05ad…`) + egress 1 本 (`all` `sgr-0d28…`) を import
+- [x] SSH 許可元 IP を `var.admin_ssh_cidr` (default `126.94.68.118/32`) に切り出し、ISP 変更時に HCL を書き換えやすくした
+- [x] `terraform apply` (0 add / 4 change / 0 destroy — 全て default tags 付与)、apply 後の `plan` は drift なし
+
+> Minecraft ポート (25565) は現状 `network.tf` にハードコード。`registry.json` 由来にする件は Step 5 の Launch Template 整理とあわせて対応する。
 
 Worker コード変更: なし。
 

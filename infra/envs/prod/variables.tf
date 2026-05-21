@@ -25,3 +25,9 @@ variable "budget_warning_threshold_percent" {
   type        = number
   default     = 75
 }
+
+variable "admin_ssh_cidr" {
+  description = "SSH (port 22) を許可する管理者の送信元 CIDR。ISP の IP 変更時はここを更新"
+  type        = string
+  default     = "126.94.68.118/32"
+}

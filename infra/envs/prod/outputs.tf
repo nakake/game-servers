@@ -12,3 +12,13 @@ output "monthly_budget_name" {
   description = "AWS Budgets 上の名前。手動 Budget を削除する際の目印"
   value       = aws_budgets_budget.monthly.name
 }
+
+output "security_group_id" {
+  description = "wrangler.toml の EC2_SECURITY_GROUP_ID。Step 5 の Launch Template でも使う"
+  value       = aws_security_group.game_server.id
+}
+
+output "default_subnet_id" {
+  description = "wrangler.toml の EC2_SUBNET_ID。ゲームサーバーを起動する subnet"
+  value       = data.aws_subnet.default_a.id
+}
