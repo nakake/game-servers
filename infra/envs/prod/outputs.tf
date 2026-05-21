@@ -32,3 +32,8 @@ output "key_pair_name" {
   description = "EC2 SSH ログイン用 Key Pair 名 (wrangler.toml の EC2_KEY_NAME に対応)"
   value       = data.aws_key_pair.gs_phase0.key_name
 }
+
+output "launch_template_id" {
+  description = "wrangler.toml の EC2_LAUNCH_TEMPLATE_ID。Worker が RunInstances の LaunchTemplate 参照に使う (Step 5b で切替)"
+  value       = aws_launch_template.game_server.id
+}
