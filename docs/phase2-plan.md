@@ -1,6 +1,6 @@
 # Phase 2 実装計画 — ゲーム抽象化 (registry 駆動化)
 
-最終更新: 2026-05-22
+最終更新: 2026-05-23
 
 ## このドキュメントについて
 
@@ -11,9 +11,9 @@ Worker は ATM11 をハードコードした最小実装になっており、こ
 各 Step は独立して動作確認でき、Worker のコード変更の有無を明示する。Step 完了ごとに本
 ドキュメントの該当 checkbox を埋めて進捗を見える化する (iac-migration-plan.md と同じ運用)。
 
-> **進捗 (2026-05-22)**: 計画策定完了。Step 1〜4 完了 (`register-game.mjs` / スキーマ +
-> registry バックフィル / `GAME_REGISTRY` KV 作成 + atm11 投入 / Worker を registry 駆動に
-> 切替)。Step 5〜8 未着手。
+> **進捗 (2026-05-23)**: Step 1〜6 完了 (`register-game.mjs` / スキーマ + registry バック
+> フィル / `GAME_REGISTRY` KV 作成 + atm11 投入 / Worker を registry 駆動に切替 / `/start`
+> `/stop` の game 引数 autocomplete 化 / デプロイ + ATM11 回帰確認)。Step 7〜8 未着手。
 
 ## 関連ドキュメント
 
@@ -186,14 +186,14 @@ Worker コード変更: **あり (大)**。デプロイは Step 6。
 
 Worker コード変更: **あり**。コマンド再登録とデプロイは Step 6。
 
-### Step 6: デプロイ + ATM11 回帰確認  *(未着手)*
+### Step 6: デプロイ + ATM11 回帰確認  *(完了 2026-05-23)*
 
-- [ ] `register-discord-commands.mjs --global` を実行し autocomplete 版に再登録 (1 回限り)
-- [ ] `pnpm deploy` (`wrangler deploy`) で Worker を本番反映
-- [ ] `/list` に atm11 が表示される
-- [ ] `/start atm11` → `/stop atm11` で Spot 起動・snapshot 作成・terminate を実機確認
+- [x] `register-discord-commands.mjs --global` を実行し autocomplete 版に再登録 (1 回限り)
+- [x] `pnpm deploy` (`wrangler deploy`) で Worker を本番反映
+- [x] `/list` に atm11 が表示される
+- [x] `/start atm11` → `/stop atm11` で Spot 起動・snapshot 作成・terminate を実機確認
       (KV 駆動への切替で既存挙動が壊れていないことの回帰テスト)
-- [ ] `/start` `/stop` の引数入力時、autocomplete に atm11 が出る
+- [x] `/start` `/stop` の引数入力時、autocomplete に atm11 が出る
 
 Worker コード変更: なし (デプロイのみ)。`wrangler deploy` と Discord 実機操作はユーザーが実施。
 
