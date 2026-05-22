@@ -1,8 +1,8 @@
 // Cloudflare DNS API ラッパ。
 //
-// Phase 1: Worker から `/start <game>` 時に DNS A レコードを Spot EC2 の public IP に更新する
-// 用途。事前に `scripts/register-game.sh` (Phase 2 で実装) で record を作成し、
-// `cf_record_id` を registry.json に保存しておく前提。
+// Worker から `/start <game>` 時に DNS A レコードを Spot EC2 の public IP に更新する用途。
+// 事前に `node scripts/register-game.mjs <game_id>` で record を作成し、
+// `cf_record_id` を registry.json に保存しておく前提 (KV にも同 ID で登録される)。
 //
 // 認証: API Token (Bearer)。Permissions: Zone:DNS:Edit 限定のものを発行する。
 //

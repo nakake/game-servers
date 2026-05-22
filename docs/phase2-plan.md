@@ -1,6 +1,6 @@
 # Phase 2 実装計画 — ゲーム抽象化 (registry 駆動化)
 
-最終更新: 2026-05-23
+最終更新: 2026-05-23 (Phase 2 終結)
 
 ## このドキュメントについて
 
@@ -11,9 +11,11 @@ Worker は ATM11 をハードコードした最小実装になっており、こ
 各 Step は独立して動作確認でき、Worker のコード変更の有無を明示する。Step 完了ごとに本
 ドキュメントの該当 checkbox を埋めて進捗を見える化する (iac-migration-plan.md と同じ運用)。
 
-> **進捗 (2026-05-23)**: Step 1〜6 完了 (`register-game.mjs` / スキーマ + registry バック
-> フィル / `GAME_REGISTRY` KV 作成 + atm11 投入 / Worker を registry 駆動に切替 / `/start`
-> `/stop` の game 引数 autocomplete 化 / デプロイ + ATM11 回帰確認)。Step 7〜8 未着手。
+> **Phase 2 終結 (2026-05-23)**: Step 1〜6 + Step 8a 完了。**Phase 2 のスコープは「registry
+> 駆動レイヤーの構築」までで打ち止め** とし、Step 7 (Vanilla 1.21 による 2 個目ゲーム実証) は
+> 公開後の次バージョンに送って `design.md` §10 **Phase 6** に切り出した。Phase 3 (自動停止) と
+> Phase 5 (OIDC) を公開前に優先する判断 (2026-05-23 ユーザー方針: 友人内クローズドで公開)。
+> Step 8b (Open Question 再評価) は Phase 5 完了後に最終化する。
 
 ## 関連ドキュメント
 
@@ -22,12 +24,14 @@ Worker は ATM11 をハードコードした最小実装になっており、こ
 - [games/_template/](../games/_template/) — ゲーム定義の雛形と各フィールドの説明
 - [CLAUDE.md](../CLAUDE.md) §ゲーム追加・変更 / §Worker のコード
 
-## ゴール
+## ゴール (Phase 2 終結版)
 
-> **Vanilla 1.21 を `games/vanilla/` に追加 → `register-game.mjs` 実行 → `/list` `/start`
-> `/stop` が動く。Worker のコード・`wrangler.toml`・Discord コマンド定義の編集が一切不要。**
+> **Worker コードに `atm11` リテラルが残らず、新ゲーム追加時に Worker / `wrangler.toml` /
+> Discord コマンド定義の編集が要らない構造に到達する。** ATM11 を KV 駆動で起動・停止できる
+> 状態を回帰確認まで通す。
 
-design.md §10 Phase 2 の 3 項目 (KV 投入 / registry 駆動 / 2 個目のゲーム) をこれで満たす。
+design.md §10 Phase 2 の 3 項目 (KV 投入 / registry 駆動 / 2 個目のゲーム) のうち **1〜2 項目目
+を満たす**。3 項目目 (2 個目のゲーム実証) は Phase 6 に移譲。
 
 ## 決定事項 (2026-05-22)
 
@@ -197,61 +201,71 @@ Worker コード変更: **あり**。コマンド再登録とデプロイは Ste
 
 Worker コード変更: なし (デプロイのみ)。`wrangler deploy` と Discord 実機操作はユーザーが実施。
 
-### Step 7: Vanilla 1.21 追加 (実証)  *(未着手)*
+### Step 7: Vanilla 1.21 追加 (実証)  *(Phase 6 へ移譲 2026-05-23)*
 
-Phase 2 のゴール検証。**ここで Worker のコードを 1 行も触らずに完結することを確認する。**
+> **本 Step は Phase 2 から外し、`design.md` §10 Phase 6「新ゲーム追加実証」に移譲した。**
+>
+> 移譲の判断 (2026-05-23 ユーザー方針): ゲーム追加よりも公開前に実装すべき機能 (自動停止 /
+> 通知拡張 / OIDC) を優先したい。Phase 2 で出来上がった registry 駆動レイヤー自体は ATM11 で
+> 回帰確認済 (Step 6) のため、2 個目ゲームでの実証 (= Phase 2 当初の完了条件) は次バージョン
+> の建付けと合わせて詳細評価する。
+>
+> Phase 6 で扱う具体的な作業項目 (元 Step 7 の内容) は `design.md` §10 Phase 6 に転記済。
+> 着手時はそちらを参照すること。
 
-- [ ] `games/vanilla/` を `games/_template/` からコピー
-- [ ] `registry.json` 編集: `game_id=vanilla` / `display_name` / `subdomain=vanilla` /
-      `image_source="pull"` / `container_image="itzg/minecraft-server:java21"` /
-      `instance_types` / `ebs_size_gb` / `env` (`TYPE=VANILLA`, `VERSION=1.21.x`) /
-      `idle_check` / `seed_snapshot_id=null`
-- [ ] SSM Parameter `/gs/vanilla/rcon_password` を SecureString で作成 (runbook の手順に準拠)
-- [ ] `config/` にゲーム設定を配置 (Vanilla は最小、必要なら `server.properties`)
-- [ ] `README.md` にゲーム固有メモを記述
-- [ ] `node scripts/register-game.mjs vanilla` 実行 (DNS レコード作成 + S3 sync + KV 投入)
-- [ ] `/list` に vanilla が出現
-- [ ] `/start vanilla` — **blank EBS の初回 `mkfs` 起動** と **`docker pull` 経路** を実機確認
-- [ ] `/stop vanilla` — snapshot 作成・terminate
-- [ ] 再 `/start vanilla` で world が永続していることを確認
-- [ ] **Worker のコード変更ゼロでここまで到達したことを確認** ← Phase 2 ゴール達成
+### Step 8: ドキュメント更新 + Phase 2 末の再評価
 
-Worker コード変更: なし (これが完了条件)。
+#### Step 8a: ドキュメント表記の整理  *(完了 2026-05-23)*
 
-### Step 8: ドキュメント更新 + Phase 2 末の再評価  *(未着手)*
+- [x] `CLAUDE.md`: `register-game.sh` → `register-game.mjs`、§ゲーム追加・変更のフロー更新
+- [x] `design.md`: §3.2 / §6 ツリー / §10 Phase 2 の `register-game.sh` 表記修正
+- [x] `design.md` §10 Phase 2 を完了マーク + Phase 6 (新ゲーム追加実証) を新設し Step 7 を移譲
+- [x] `design.md` §10 Phase 3/4/5 を「公開前必須/推奨」として整理 (Phase 4 は IaC migration 完了済を反映、通知拡張に絞る)
+- [x] `iac-migration-plan.md`: `register-game.sh` 表記を `.mjs` に修正、Cloudflare DNS の IaC 化判断は Phase 6 結果待ちと記述
+- [x] `workers/discord-handler/src/lib/cloudflare/dns.ts`: コメント内の stale な `register-game.sh (Phase 2 で実装)` を実装済表記に修正
+- [x] `design.md` §11: OIDC タイミングの Open Question を「Phase 5 として公開前実施」で確定 (close)
 
-- [ ] `CLAUDE.md`: `register-game.sh` → `register-game.mjs`、§ゲーム追加・変更のフロー更新
-- [ ] `design.md`: §3.2 / §10 Phase 2 の `register-game.sh` 表記修正、Phase 2 checkbox を更新
-- [ ] `design.md` §10 Phase 2 を完了マーク
-- [ ] **Open Question 再評価** (design.md §11 / iac-migration-plan.md):
-  - OIDC 移行のタイミング (Cloudflare Workers → AWS AssumeRole、design.md §5.6)
-  - Cloudflare DNS の IaC 化要否 (iac-migration-plan.md Step 9 から移管された判断)
+#### Step 8b: Open Question 再評価  *(Phase 5 完了後)*
+
+- [ ] **Cloudflare DNS の IaC 化要否** (`iac-migration-plan.md` Step 9 から移管 → Phase 6 へ再移管):
+  `register-game.mjs` の運用実績を見て判断するため、Phase 6 (新ゲーム追加実証) の結果を待つ。
+  Phase 2 終結時点では「現状の `register-game.mjs` 運用を継続、IaC 化は保留」
 
 ---
 
-## 完了基準
+## 完了基準 (Phase 2 終結版)
 
-- [ ] Vanilla を **Worker コード変更ゼロ**で追加・起動・停止できた (Step 7)
-- [ ] `wrangler.toml` に `ATM11_*` / `LAUNCHER_*` のゲーム固有 vars が残っていない
-- [ ] Worker のソースに `atm11` / `vanilla` の文字列リテラルが (コメントを除き) 無い
-- [ ] `/start` `/stop` の autocomplete が KV から動的にゲーム候補を出す
-- [ ] design.md §10 Phase 2 の 3 項目すべて達成
+Phase 2 の終結に必要な条件 (Phase 6 移譲分は除外):
 
-## Phase 2 で扱わないもの (持ち越し)
+- [x] `wrangler.toml` に `ATM11_*` / `LAUNCHER_*` のゲーム固有 vars が残っていない (Step 4)
+- [x] Worker のソースに `atm11` の文字列リテラルが (コメントを除き) 無い (Step 4)
+- [x] `/start` `/stop` の autocomplete が KV から動的にゲーム候補を出す (Step 5)
+- [x] ATM11 で `/start` → `/stop` → 再 `/start` が KV 駆動経路で回帰確認済 (Step 6)
+- [x] design.md §10 Phase 2 の 3 項目のうち 2 項目 (KV 投入 / registry 駆動) を達成。3 項目目 (2 個目のゲーム実証) は Phase 6 に移譲
 
-- **ポートの Terraform 生成** (iac-migration-plan.md Step 2 からの持ち越し): Vanilla も
-  TCP 25565 で Security Group の変更が不要。別ポートのゲーム (Terraria 7777、Valheim UDP 等)
-  が登場した時点で `network.tf` を registry 由来に一般化する。`register-game.mjs` は SG を
-  触らない (SG は Terraform 管理 = スクリプトが触ると drift)
-- **OIDC 移行** (design.md §5.6): 「Phase 2 末で再評価」と規定 → Step 8 で判断
+Phase 6 に持ち越した条件:
+
+- [ ] Vanilla を **Worker コード変更ゼロ**で追加・起動・停止できた (元 Step 7 → Phase 6)
+
+## Phase 2 で扱わないもの (持ち越し先)
+
+- **2 個目ゲーム実証 (Vanilla 1.21)**: 元 Step 7 → **Phase 6** (新ゲーム追加実証)
+- **ポートの Terraform 生成** (iac-migration-plan.md Step 2 からの持ち越し): 別ポートの
+  ゲーム (Terraria 7777、Valheim UDP 等) が登場した時点で `network.tf` を registry 由来に
+  一般化する → **Phase 6** で実ゲーム追加時に判断。`register-game.mjs` は SG を触らない
+  (SG は Terraform 管理 = スクリプトが触ると drift)
+- **OIDC 移行** (design.md §5.6): 「Phase 2 末で再評価」と規定 → 2026-05-23 判断で **Phase 5**
+  として公開前に実施に確定
 - **新 Key Pair 発行** (iac-migration-plan.md Step 4 option): ゲーム追加と無関係、任意
-- **週次 S3 バックアップ** (design.md §5.5): Phase 3 以降
-- **sidecar / idle 自動停止**: Phase 3
+- **週次 S3 バックアップ** (design.md §5.5): **Phase 4** (通知拡張) で完了通知と合わせて再検討
+- **sidecar / idle 自動停止**: **Phase 3** (公開前必須)
+- **Cloudflare DNS の IaC 化要否**: → **Phase 6** で `register-game.mjs` 運用実績を見て判断
 
 ## Open Questions
 
 - [ ] **KV 反映の自動化**: 現状 `register-game.mjs` の手動実行のみ。CI で `games/**` 変更時に
-  自動投入するかは Phase 4 (GitHub Actions) で再検討
+  自動投入するかは **Phase 6** (新ゲーム追加実証) でゲームが複数になってから再検討。
+  Phase 4 (通知拡張) のスコープは AWS 通知の Discord 集約に絞り直したため、CI 拡張は含めない
 - [ ] **KV の eventual consistency**: KV は最大 60 秒のグローバル伝播遅延がある。ゲーム定義は
   変更頻度が低く許容範囲。`register-game.mjs` 直後の `/list` 不一致は無視してよい
 - [ ] **`enabled: false` のゲームの扱い**: `/list` と autocomplete からは除外する。`/start` は

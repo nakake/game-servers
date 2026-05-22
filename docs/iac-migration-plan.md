@@ -259,11 +259,11 @@ Worker コード変更: なし。
 Step 9 で TF に取り込む唯一の候補だった DNS record が IaC 不適合と判明したため:
 
 - `atm11` の DNS A レコードの `content` (IP) は **Worker が `/start` / `/stop` のたびに `cf.updateRecord()` で実行時に書き換える** (`workers/discord-handler/src/lib/cloudflare/dns.ts`、CLAUDE.md「Elastic IP 禁止 = 起動毎に DNS 更新」)。runtime で値が変わるリソースを TF 管理下に置くと毎 `apply` で drift が出て、IP を巻き戻し稼働中サーバーへの接続を壊しうる。EBS snapshot 個別 (Step 6) と同じ「アプリ生成・IaC 不適合」の構図。
-- record の **作成**は `scripts/register-game.sh` (Phase 2 実装予定)、**更新**は Worker が担う設計。DNS のライフサイクルは Phase 2 のゲーム追加自動化そのものの設計事項であり、Cloudflare の IaC 化を論じるなら Phase 2 と一体で行うのが自然。
+- record の **作成**は `scripts/register-game.mjs` (Phase 2 Step 1 で実装済)、**更新**は Worker が担う設計。DNS のライフサイクルは Phase 2 のゲーム追加自動化そのものの設計事項であり、Cloudflare の IaC 化を論じるなら Phase 2 と一体で行うのが自然。
 - record を管理しないなら `cloudflare` provider を入れても TF 側に管理対象が残らない (zone ID は Worker が env で保持)。
 - 補足: Terraform は **provider 設定値 (API Token) を state に保存しない**。当初計画と「State の安全性」表の Token 前提はやや過剰だった (Step 8 の S3+SSE-KMS 化自体は無害で判断は妥当)。
 
-→ 本 IaC 移行計画 (Step 0〜9) は **Step 8 をもって実質完了**とする。Cloudflare DNS の IaC 化要否は Phase 2 で `register-game.sh` の設計と合わせて判断する。
+→ 本 IaC 移行計画 (Step 0〜9) は **Step 8 をもって実質完了**とする。Cloudflare DNS の IaC 化要否は `register-game.mjs` の運用実績 (Phase 6 の新ゲーム追加実証) を見てから再判断する。
 
 ---
 
@@ -292,7 +292,7 @@ local state 期間 (Step 0〜7) は `.gitignore` 配下のローカル限定。S
 - **Discord Application / Bot / Public Key** — Discord 側に Terraform provider が無い (community provider はあるが本番投入は時期尚早)
 - **Discord Bot Token** — Wrangler secret 経由
 - **Cloudflare API Token** — CF UI でしか発行できない
-- **Cloudflare DNS record / zone** — `atm11` 等の A レコードは Worker が `/start`/`/stop` で IP を実行時更新する (runtime 可変 = IaC 不適合、EBS snapshot 個別と同じ扱い)。record 作成は Phase 2 の `register-game.sh`。Cloudflare の IaC 化方針は Phase 2 で再検討 (Step 9 を移管)
+- **Cloudflare DNS record / zone** — `atm11` 等の A レコードは Worker が `/start`/`/stop` で IP を実行時更新する (runtime 可変 = IaC 不適合、EBS snapshot 個別と同じ扱い)。record 作成は `scripts/register-game.mjs` (Phase 2 Step 1 で実装済)。Cloudflare の IaC 化方針は Phase 6 (新ゲーム追加実証) の運用結果を見て再判断 (Step 9 を移管)
 - **Worker secrets** — `wrangler secret put` が公式の流儀
 - **EBS snapshot の世代** — アプリ動作 (Worker `/stop`) で生成。世代管理も Worker の Cron (`handlers/snapshot-retention.ts`) で行う (Step 6、DLM 不採用)。個々の snapshot は TF で宣言しない
 - **wrangler.toml の vars** — Worker デプロイで管理 (ただし Terraform output の値をコピーする運用)

@@ -1,6 +1,6 @@
 # Game Servers — 設計ドキュメント
 
-最終更新: 2026-05-21 (rev 3: §10 に Phase 1 進捗を反映)
+最終更新: 2026-05-23 (rev 4: Phase 2 完了。新ゲーム追加実証は Phase 6 に切り出し、Phase 3〜5 を公開前タスクとして優先)
 
 ## 1. 目的とスコープ
 
@@ -107,10 +107,10 @@ interface GameDefinition {
 ```
 1. games/<game_id>/registry.json を作成
 2. games/<game_id>/config/  にゲーム設定 (server.properties, JVM args, world template など)
-3. scripts/register-game.sh <game_id> 実行
-   ├─ Cloudflare DNS A レコード作成 → record_id 取得
-   ├─ S3 に config をアップロード
-   └─ Workers KV に registry 投入
+3. node scripts/register-game.mjs <game_id> 実行
+   ├─ Cloudflare DNS A レコード作成 → record_id を registry.json に書き戻し
+   ├─ S3 に config をアップロード (aws s3 sync)
+   └─ Workers KV (GAME_REGISTRY) に registry 投入
 4. 初回起動: 空 EBS で起動 → ゲーム自動セットアップ → 初回 snapshot 作成
 5. Discord で /start <game_id> 確認
 ```
@@ -425,7 +425,7 @@ F:/project/game_servers/
 │  └─ vanilla/
 │
 ├─ scripts/                      # 開発・運用
-│  ├─ register-game.sh
+│  ├─ register-game.mjs
 │  ├─ deploy-worker.sh
 │  ├─ build-ami.sh
 │  ├─ snapshot-list.sh
@@ -616,43 +616,65 @@ F:/project/game_servers/
 > 引き継ぎ (pending 完成待ち + Cron での volume 回収) と Budget→SNS→Discord 通知も実機確認済で
 > Phase 1 のゴールを達成。残りは月コストの実測のみ (§8 試算 ¥685/月 の検証)。
 
-### Phase 2: ゲーム抽象化 (2 日)
+### Phase 2: ゲーム抽象化 (registry 駆動基盤) — 完了 (2026-05-23)
 
-- [ ] Workers KV に GAME_REGISTRY 投入
-- [ ] registry 駆動で Worker 動作
-- [ ] 2 個目のゲーム (Vanilla 1.21) を追加して動作確認
+- [x] Workers KV に GAME_REGISTRY 投入 (atm11)
+- [x] registry 駆動で Worker 動作 (build-time import を撤去、`atm11` リテラルを Worker から除去)
+- [x] Discord `/start` `/stop` の game 引数 autocomplete 化 (KV 由来)
+- [x] `scripts/register-game.mjs` 実装 (DNS + S3 + KV 一括投入)
+- [x] ATM11 で `/start` → `/stop` → 再 `/start` の回帰確認
 
-ゴール: ゲーム追加が registry 更新だけで完結
+ゴール: ゲーム追加用の **registry 駆動レイヤー** が整い、Worker コードに新ゲーム追加で触らない構造になる。
 
-### Phase 3: 自動停止 (2 日)
+> Phase 2 当初計画にあった「2 個目のゲーム (Vanilla 1.21) 追加実証」は **Phase 6 に切り出し**
+> た (公開前の Phase 3〜5 を優先するため)。詳細は `docs/phase2-plan.md`。
+
+### Phase 3: 自動停止 (2 日) — **公開前必須**
 
 - [ ] sidecar コンテナ実装 (TypeScript / Docker)
 - [ ] idle 検知 → Workers POST → 停止フロー
-- [ ] snapshot 世代管理 (Worker Cron、§5.5 — DLM は不採用)
-- [ ] Workers cron フォールバック
+- [ ] snapshot 世代管理 (Worker Cron、§5.5 — DLM は不採用) ※IaC migration Step 6 で Worker Cron 実装済、Phase 3 では sidecar 連携を追加
+- [ ] Workers cron フォールバック (sidecar 沈黙時の保険)
 
-ゴール: 放置で勝手に停止する
+ゴール: 放置で勝手に停止する。**友人内クローズドでも公開時にコスト保全のため最優先**。
 
-### Phase 4: IaC 化 + 通知拡張 (3〜5 日)
+### Phase 4: 通知拡張 (1〜2 日) — **公開前必須**
 
-- [ ] Terraform で AWS リソース全部記述
-- [ ] Packer で AMI ビルド
-- [ ] GitHub Actions で worker / AMI / terraform CI
-- [ ] runbook.md 整備
-- [ ] SNS topic `gs-alerts` を Terraform 化、Worker URL に subscribe
-- [ ] EventBridge ルール追加 (Spot 中断警告, DLM 失敗) → SNS → Discord
-- [ ] CloudTrail → EventBridge で IAM ログイン異常検知 → Discord
-- [ ] 週次バックアップ完了通知 (info レベル)
+Terraform 化 / Packer / GitHub Actions の項目は IaC migration (`docs/iac-migration-plan.md`) で完了済。本 Phase は **AWS 通知の Discord 集約強化** に絞る。
 
-ゴール: 完全コード化、災害復旧 1 時間以内、AWS 通知が Discord に集約
+- [ ] EventBridge ルール追加 (Spot 中断警告) → SNS → Discord (IaC migration Step 7 で EventBridge → SNS は配線済、Discord 整形を充実)
+- [ ] Worker Cron の snapshot 世代管理失敗通知 → SNS → Discord
+- [ ] CloudTrail → EventBridge で IAM ログイン異常検知 → Discord (任意)
+- [ ] 週次バックアップ完了通知 (info レベル、Phase 3 の sidecar/snapshot 完了 webhook と統合)
 
-### Phase 5 (任意): OIDC 化、Terraria 追加など
+ゴール: 公開後のオペレーション可視性。AWS の異常が **Discord に必ず届く**。
+
+### Phase 5: OIDC 化 (1 日) — **公開前推奨**
+
+- [ ] Cloudflare Workers → AWS AssumeRole の OIDC 信頼関係を Terraform で構築 (`infra/modules/aws-oidc-cloudflare/` 新設)
+- [ ] Worker の AWS 認証経路を `aws4fetch` の static credentials から OIDC token + STS AssumeRole に置換
+- [ ] 既存 IAM Access Key を非アクティブ化 → 一定期間後に削除 (rollback 余地)
+- [ ] design.md §5.6 / §4.4 を OIDC 前提に更新
+
+ゴール: Workers Secrets から長期 Access Key を排除。公開後のクレデンシャル流出時の影響範囲を AssumeRole 時間に絞る。
+
+### Phase 6 (将来): 新ゲーム追加実証 / 次バージョン機能
+
+Phase 2 の足場の上で実施するゲーム拡張。**公開後の次バージョンで取り組む**。
+
+- [ ] **Vanilla 1.21 を追加** (Phase 2 Step 7 から移譲): `games/vanilla/` を `games/_template/` からコピー、`image_source: "pull"` で `itzg/minecraft-server:java21` を使う。`node scripts/register-game.mjs vanilla` のみで `/list` `/start` `/stop` が通り、**Worker のコード変更ゼロ** であることを確認 (= Phase 2 のゴール実証)
+- [ ] **blank EBS 初回 `mkfs` 経路の実機確認**: 種 snapshot を持たない新ゲームの初回起動が壊れていないか
+- [ ] **`docker pull` 経路の実機確認**: `image_source: "pull"` の経路が `build` と同等に動くか
+- [ ] **Cloudflare DNS の IaC 化要否を判断** (`docs/iac-migration-plan.md` Step 9 移管): `register-game.mjs` の運用実績を見てから決める
+- [ ] **Terraria / Valheim 等の追加** (任意): 別 category の検証で sidecar idle 検知アダプタを実装
+
+ゴール: ゲーム追加が **registry 更新だけで完結する** ことを 2 個目以降のゲームで実証。
 
 ---
 
 ## 11. 未決事項 / Open Questions
 
-- [ ] OIDC vs Access Key の切り替えタイミング (Phase 2 末で再評価)
+- [x] OIDC vs Access Key の切り替えタイミング (Phase 2 末で再評価 2026-05-23 → Phase 5 として公開前に実施に確定)
 - [ ] world データの S3 ライフサイクル (90 日 Glacier 移行?)
 - [ ] 複数プレイヤー時のデータ転送量実測 → 無料枠超過閾値
 - [ ] ATM11 で Xmx 10GB 実運用可能か (Phase 0 で判定)
