@@ -1,6 +1,6 @@
 # Runbook — Phase 1 本番接続
 
-最終更新: 2026-05-21
+最終更新: 2026-05-22
 
 ## このドキュメントについて
 
@@ -115,9 +115,15 @@ Discord クライアントで対象 guild の入力欄に `/` を入れて `/lis
 
 `runbook-phase1.md` の Step 1 (IAM ユーザー) と Step 2 (EC2 IAM role に SSM 権限) は完了済み前提。本番接続では Worker が EC2 / EBS を直接操作するので、追加で `gs-worker-caller-policy` を拡張する必要がある。
 
-### 3.0 gs-worker-caller-policy に EC2 / EBS 権限を追加
+> **⚠️ 2026-05 更新 — AWS リソースは Terraform 管理に移行済**
+>
+> Phase 1 当時は本 Step を AWS Console で手作業したが、その後の IaC 移行 (`docs/iac-migration-plan.md`、Step 0〜8) で IAM ポリシー / SNS topic + subscription / S3 bucket / Budget をすべて `infra/envs/prod/` の Terraform 定義に取り込んだ。**環境を再構築する場合、Step 3.0 / 3.0.1 / 3.2 (bucket) / 3.4 と Step 5.1 / 5.3 の手動操作は不要** — `infra/README.md` の手順で `terraform apply` すれば揃う。以下は当時の手順に「現在の管理元」を併記して残す。
+>
+> 手動操作がまだ要るのは **3.1 (SSM SecureString — 秘密値を state に出さないため意図的に IaC 外)** / **3.2 の launcher tarball アップロード (アプリ配布物)** / **3.3 (snapshot ID 確認)** / **3.5 (Discord webhook)**、および Step 1 の Cloudflare 周り。
 
-IAM Console → **Policies → gs-worker-caller-policy → Edit** で以下の Statement を追加 (既存 SSM ステートメントの後ろに):
+### 3.0 gs-worker-caller-policy の EC2 / EBS 権限  *(現在 Terraform 管理)*
+
+> **現在は `infra/envs/prod/iam.tf` の `aws_iam_policy.gs_worker_caller` (`gs-worker-caller-policy`) で Terraform 管理。** 環境再構築時に手動の Console 編集は不要。以下の JSON は Phase 1 当時の付与内容で、参考として残す (実体は `iam.tf` を正とする — `ec2:DeleteSnapshot` は IaC 移行 Step 6 で追加、`SsmAmiResolve` には `parameter/gs/*` も追加済)。
 
 ```json
 {
@@ -165,11 +171,11 @@ IAM Console → **Policies → gs-worker-caller-policy → Edit** で以下の S
 >
 > `ec2:DeleteVolume` は `/stop` が予約し Cron Trigger が snapshot 完成後に旧 data volume を削除するために必須。これが無いと Cron の volume 削除が `UnauthorizedOperation` で失敗し、available volume が課金されたまま残る。
 
-### 3.0.1 EC2 IAM role (`gs-phase0-ec2-role`) に `sns:Publish` を追加
+### 3.0.1 EC2 IAM role の `sns:Publish` inline policy  *(現在 Terraform 管理)*
 
 user-data 末尾で「サーバー接続可能」通知を SNS に publish するため、EC2 側 role に publish 権限が要る。
 
-IAM Console → **Roles → gs-phase0-ec2-role → Add permissions → Create inline policy**:
+> **現在は `infra/envs/prod/iam.tf` の `aws_iam_role_policy.ec2_sns_publish` (`gs-phase0-ec2-sns-publish`) で Terraform 管理。** 環境再構築時に手動の Console 操作は不要。以下の JSON は参考。
 
 ```json
 {
@@ -189,7 +195,9 @@ Policy 名: `gs-phase0-ec2-sns-publish`
 
 > Resource を `gs-alerts` topic に絞ることで、万一 EC2 が乗っ取られても publish 先を限定できる。
 
-### 3.1 SSM Parameter Store に RCON password
+### 3.1 SSM Parameter Store に RCON password  *(IaC 外 — 手動)*
+
+> この SecureString は秘密値を Terraform state に出さないため**意図的に IaC 外**とした (iac-migration-plan.md Step 3 / 案 b)。環境再構築時もこの手順を手動で実行する。
 
 ```powershell
 $pw = -join ((48..57) + (65..90) + (97..122) | Get-Random -Count 24 | ForEach-Object { [char]$_ })
@@ -201,12 +209,11 @@ aws ssm put-parameter `
 # Worker / EC2 user-data が動的取得するためメモは不要 (記憶しても害はない)
 ```
 
-### 3.2 S3 bucket 作成 + launcher tarball upload
+### 3.2 launcher tarball を S3 にアップロード
+
+> bucket `gs-game-configs` 自体は `infra/envs/prod/storage.tf` の `aws_s3_bucket.gs_game_configs` で Terraform 管理 (versioning + lifecycle + SSE-S3)。`aws s3 mb` は不要。以下の tarball アップロードはアプリ配布物の同期で、再構築時も手動で行う。
 
 ```powershell
-aws s3 mb s3://gs-game-configs --region ap-northeast-1
-# bucket は default private、EC2 IAM の AmazonS3ReadOnlyAccess で GetObject 可
-
 cd F:\project\game_servers
 .\scripts\sync-launcher-to-s3.ps1 -GameId atm11
 # → s3://gs-game-configs/launcher/atm11.tar.gz
@@ -227,15 +234,9 @@ aws ec2 describe-snapshots `
   --region ap-northeast-1
 ```
 
-### 3.4 SNS topic 作成
+### 3.4 SNS topic  *(現在 Terraform 管理)*
 
-AWS Console → **Simple Notification Service → Topics → Create topic**:
-- Type: **Standard**
-- Name: `gs-alerts`
-- Display name: `gs-alerts`
-- → **Create topic**
-
-作成された Topic ARN をメモ (`SNS_ALLOWED_TOPIC_ARN`)、例: `arn:aws:sns:ap-northeast-1:111111111111:gs-alerts`
+> SNS topic `gs-alerts` (topic policy 含む) は `infra/envs/prod/sns.tf` の `aws_sns_topic.gs_alerts` で Terraform 管理。手動の Console 作成は不要。Topic ARN (`SNS_ALLOWED_TOPIC_ARN`) は `infra/envs/prod` で `terraform output sns_alerts_topic_arn` で取得できる。
 
 ### 3.5 Discord channel webhook 発行
 
@@ -278,16 +279,15 @@ AWS_REGION = "ap-northeast-1"
 CLOUDFLARE_ZONE_ID = "<your-zone-id>"
 CLOUDFLARE_BASE_DOMAIN = "example.com"
 EC2_SUBNET_ID = "subnet-xxxxxxxx"
-EC2_SECURITY_GROUP_ID = "sg-xxxxxxxx"
-EC2_KEY_NAME = "gs-phase0-key"
-EC2_IMAGE_ID = "resolve:ssm:/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64"
-EC2_INSTANCE_PROFILE_NAME = "gs-phase0-ec2-role"
+EC2_LAUNCH_TEMPLATE_ID = "lt-xxxxxxxx"
 ATM11_SNAPSHOT_ID = "snap-xxxxxxxx"
 ATM11_CF_RECORD_ID = "<dns-record-id>"
 ATM11_RCON_PASSWORD_SSM_PATH = "/gs/atm11/rcon_password"
 LAUNCHER_TARBALL_S3_URI = "s3://gs-game-configs/launcher/atm11.tar.gz"
 SNS_ALLOWED_TOPIC_ARN = "arn:aws:sns:ap-northeast-1:111111111111:gs-alerts"
 ```
+
+> `EC2_SUBNET_ID` / `EC2_LAUNCH_TEMPLATE_ID` / `SNS_ALLOWED_TOPIC_ARN` などは `infra/envs/prod` の `terraform output` から取得する。`EC2_IMAGE_ID` / `EC2_KEY_NAME` / `EC2_SECURITY_GROUP_ID` / `EC2_INSTANCE_PROFILE_NAME` は Launch Template (`aws_launch_template.game_server`) に集約され、vars からは削除済 (iac-migration-plan.md Step 5)。
 
 ### 4.3 デプロイ
 
@@ -320,14 +320,9 @@ https://discord.com/developers/applications → アプリ → **General Informat
 
 ## Step 5: SNS topic を Worker に subscribe
 
-### 5.1 subscription 作成
+### 5.1 subscription  *(現在 Terraform 管理)*
 
-AWS Console → SNS → **Topics → gs-alerts → Create subscription**:
-- Protocol: **HTTPS**
-- Endpoint: `https://discord-handler.<account>.workers.dev/aws/notification`
-- → **Create subscription**
-
-SNS は自動で `SubscriptionConfirmation` を投げる。Worker が SubscribeURL を GET して自動承認 → subscription status が `Confirmed` になる (確認まで 5〜15 秒)。
+> HTTPS subscription (`gs-alerts` → Worker `/aws/notification`) は `infra/envs/prod/sns.tf` の `aws_sns_topic_subscription.worker_webhook` で Terraform 管理。endpoint は `var.worker_notification_url` (`terraform.tfvars`) で渡す。`terraform apply` で作成され、SNS が `SubscriptionConfirmation` を投げると Worker が SubscribeURL を GET して自動承認する (status が `Confirmed` になるまで 5〜15 秒)。手動の Console 作成は不要。
 
 ### 5.2 テスト publish
 
@@ -341,14 +336,9 @@ aws sns publish `
 
 → Discord channel (DISCORD_WEBHOOK_URL の channel) に緑色 ℹ️ embed が届く。
 
-### 5.3 Budget alert を SNS に切り替え
+### 5.3 Budget alert  *(現在 Terraform 管理)*
 
-AWS Console → **AWS Budgets → 既存 Budget (or 新規作成) → Alert thresholds**:
-- Notification type: **Amazon SNS topic**
-- SNS topic ARN: `arn:aws:sns:ap-northeast-1:111111111111:gs-alerts`
-- → Save
-
-> Budget の SNS subscribe には bucket policy で SNS 経由で AWS Budgets サービスからの publish を許可する必要がある。Console から設定する場合は自動で policy が更新される。
+> 月次コスト Budget (`gs-monthly-cap` — 75% / 100% の 2 段アラート → SNS `gs-alerts`) は `infra/envs/prod/budgets.tf` の `aws_budgets_budget.monthly` で Terraform 管理。AWS Budgets サービスからの publish 許可も `sns.tf` の topic policy (`AllowAwsServicesPublish` ステートメント) で明示済。手動の Console 設定は不要。
 
 ---
 
