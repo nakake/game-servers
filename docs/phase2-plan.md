@@ -167,21 +167,24 @@ Worker コード変更: `env.ts` の binding 宣言のみ。挙動変化なし (
 
 Worker コード変更: **あり (大)**。デプロイは Step 6。
 
-### Step 5: Discord コマンドの autocomplete 化  *(未着手)*
+### Step 5: Discord コマンドの autocomplete 化  *(完了 2026-05-22)*
 
 `/start` `/stop` の `game` 引数の静的 `choices` を撤去し、KV から動的に候補を返す
 (design.md §4.1 が `APPLICATION_COMMAND_AUTOCOMPLETE → game choices from KV` を明記)。
 これでゲーム追加時に Discord コマンドの再登録が不要になる。
 
-- [ ] `scripts/register-discord-commands.mjs`: `/start` `/stop` の `game` option を
-      `autocomplete: true` に変更、ハードコードした `choices` を削除
-- [ ] `lib/discord/types.ts`: `APPLICATION_COMMAND_AUTOCOMPLETE` (type 4) と
-      `APPLICATION_COMMAND_AUTOCOMPLETE_RESULT` (type 8) の enum を追加
-- [ ] `handlers/discord.ts`: interaction type 4 を新ハンドラに振り分け
-- [ ] `handlers/discord/autocomplete.ts` 新規: KV の `enabled` ゲームを type 8 で返す
-- [ ] `pnpm typecheck` 通過
+- [x] `scripts/register-discord-commands.mjs`: `/start` `/stop` の `game` option を
+      `autocomplete: true` に変更、ハードコードした `choices` を削除。`/stop` の `game` は
+      `required: false` → `true` に (Step 4 で無引数のデフォルトを撤去したため)
+- [x] `lib/discord/types.ts`: `InteractionResponseType` に `APPLICATION_COMMAND_AUTOCOMPLETE_RESULT`
+      (type 8) を追加、`ApplicationCommandInteractionDataOption` に `focused?: boolean` を追加。
+      `InteractionType.APPLICATION_COMMAND_AUTOCOMPLETE` (type 4) は既存
+- [x] `handlers/discord.ts`: interaction type 4 を `handleAutocomplete` に振り分け
+- [x] `handlers/discord/autocomplete.ts` 新規: KV の `enabled` ゲームを focused 値で部分一致
+      フィルタし、最大 25 件を type 8 で返す
+- [x] `pnpm typecheck` / `wrangler deploy --dry-run` 通過
 
-Worker コード変更: **あり**。
+Worker コード変更: **あり**。コマンド再登録とデプロイは Step 6。
 
 ### Step 6: デプロイ + ATM11 回帰確認  *(未着手)*
 

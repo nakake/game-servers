@@ -8,6 +8,7 @@ import {
   InteractionResponseType,
   type Interaction,
 } from '../lib/discord/types.js';
+import { handleAutocomplete } from './discord/autocomplete.js';
 import { handleListCommand } from './discord/list.js';
 import { handleStartCommand } from './discord/start.js';
 import { handleStopCommand } from './discord/stop.js';
@@ -41,6 +42,11 @@ export async function handleDiscordInteraction(
 
   if (interaction.type === InteractionType.APPLICATION_COMMAND) {
     return dispatchCommand(interaction, env, ctx);
+  }
+
+  // autocomplete (type 4): /start /stop の game 候補を KV から返す。
+  if (interaction.type === InteractionType.APPLICATION_COMMAND_AUTOCOMPLETE) {
+    return handleAutocomplete(interaction, env);
   }
 
   return Response.json({

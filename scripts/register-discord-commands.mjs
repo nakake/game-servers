@@ -42,10 +42,12 @@ const commands = [
     options: [
       {
         name: 'game',
-        description: '起動する game の ID (例: atm11)',
+        description: '起動する game の ID',
         type: 3, // STRING
         required: true,
-        choices: [{ name: 'All The Mods 11 (atm11)', value: 'atm11' }],
+        // 候補は静的 choices ではなく autocomplete で GAME_REGISTRY KV から動的に出す。
+        // ゲーム追加でこのスクリプトの再実行が不要になる (Phase 2)。
+        autocomplete: true,
       },
     ],
   },
@@ -56,10 +58,10 @@ const commands = [
     options: [
       {
         name: 'game',
-        description: '停止する game の ID (省略時は atm11)',
+        description: '停止する game の ID',
         type: 3,
-        required: false,
-        choices: [{ name: 'All The Mods 11 (atm11)', value: 'atm11' }],
+        required: true,
+        autocomplete: true,
       },
     ],
   },

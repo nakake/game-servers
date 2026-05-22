@@ -17,6 +17,8 @@ export const InteractionResponseType = {
   DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE: 5,
   DEFERRED_UPDATE_MESSAGE: 6,
   UPDATE_MESSAGE: 7,
+  // autocomplete interaction (type 4) への応答。data.choices を返す。
+  APPLICATION_COMMAND_AUTOCOMPLETE_RESULT: 8,
 } as const;
 
 export const ApplicationCommandOptionType = {
@@ -29,6 +31,8 @@ export interface ApplicationCommandInteractionDataOption {
   name: string;
   type: number;
   value?: string | number | boolean;
+  // autocomplete interaction で、ユーザーが今入力中の option に true が立つ。
+  focused?: boolean;
 }
 
 export interface ApplicationCommandInteractionData {
