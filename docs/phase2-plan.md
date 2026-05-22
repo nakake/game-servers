@@ -11,8 +11,8 @@ Worker は ATM11 をハードコードした最小実装になっており、こ
 各 Step は独立して動作確認でき、Worker のコード変更の有無を明示する。Step 完了ごとに本
 ドキュメントの該当 checkbox を埋めて進捗を見える化する (iac-migration-plan.md と同じ運用)。
 
-> **進捗 (2026-05-22)**: 計画策定完了。Step 1〜2 完了 (`register-game.mjs` / スキーマ +
-> registry バックフィル)。Step 3〜8 未着手。
+> **進捗 (2026-05-22)**: 計画策定完了。Step 1〜3 完了 (`register-game.mjs` / スキーマ +
+> registry バックフィル / `GAME_REGISTRY` KV 作成 + atm11 投入)。Step 4〜8 未着手。
 
 ## 関連ドキュメント
 
@@ -110,16 +110,24 @@ KV に投入する前に `registry.json` を最終形にする (Step 3 の投入
 
 Worker コード変更: `types.ts` の型定義のみ。挙動変化なし。
 
-### Step 3: `GAME_REGISTRY` KV 作成 + atm11 投入  *(未着手)*
+### Step 3: `GAME_REGISTRY` KV 作成 + atm11 投入  *(完了 2026-05-22)*
 
-- [ ] `wrangler kv namespace create GAME_REGISTRY` で namespace 発行
-- [ ] `wrangler.toml` の `[[kv_namespaces]]` (現在コメントアウト) を有効化し id を記載
-- [ ] `env.ts` の `GAME_REGISTRY` binding コメントを解除して型を追加
-- [ ] `node scripts/register-game.mjs atm11` で atm11 を KV に投入 (Worker はまだ KV を読まない
-      = 本番無害)
-- [ ] `wrangler kv key get --namespace-id <id> atm11` で投入内容を確認
+- [x] `wrangler kv namespace create GAME_REGISTRY` で namespace 発行
+      (`<YOUR_KV_GAME_REGISTRY_ID>`)
+- [x] `wrangler.toml` の `[[kv_namespaces]]` (コメントアウト) を有効化し id を記載
+- [x] `env.ts` の `GAME_REGISTRY` binding を有効化。`SERVER_STATE` と違い**必須** binding
+      として宣言 (registry が無いと全コマンドが機能しないため graceful degradation しない)
+- [x] `node scripts/register-game.mjs atm11` で atm11 を KV に投入 (Worker はまだ
+      `atm11.ts` の build-time import のまま = 本番無害)
+- [x] `register-game.mjs` の出力で KV 書き込み成功を確認 (read 検証は Step 6 の `/list` で実施)
 
-Worker コード変更: `env.ts` の binding 型追加のみ。挙動変化なし (デプロイは Step 6 まで保留)。
+> 実行中に `register-game.mjs` のバグを 2 件修正: ① KV stage で bare `wrangler` を呼んで
+> いたが devDependency のため `pnpm exec` 経由に / ② `wrangler kv key put` に存在しない
+> `--remote` フラグを付けており key 位置引数が食われていたため削除 (`kv key put` はデフォルト
+> で remote 対象)。あわせて外部コマンド失敗時に Node のスタックトレースではなく 1 行の
+> エラーを出すよう `run()` を改善。
+
+Worker コード変更: `env.ts` の binding 宣言のみ。挙動変化なし (デプロイは Step 6 まで保留)。
 
 ### Step 4: Worker を registry 駆動に切替  *(未着手)*
 

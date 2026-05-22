@@ -35,6 +35,14 @@ SNS_ALLOWED_TOPIC_ARN = "arn:aws:sns:ap-northeast-1:123456789012:gs-alerts"
 binding = "SERVER_STATE"
 id = "<YOUR_KV_SERVER_STATE_ID>"
 
+# ---- GAME_REGISTRY KV ----
+# ゲーム定義 (games/<id>/registry.json) の source of truth。key=<game_id> / value=JSON。
+# scripts/register-game.mjs が投入し、Worker は lib/registry/store.ts 経由で読む (Phase 2)。
+# 別環境に作り直すときは `wrangler kv namespace create GAME_REGISTRY` で発行した id に差し替える。
+[[kv_namespaces]]
+binding = "GAME_REGISTRY"
+id = "<YOUR_KV_GAME_REGISTRY_ID>"
+
 # Cron Trigger — 5 分ごとに 2 つの後追い処理を回す:
 #   - handlers/cleanup.ts           : `/stop` が予約した「snapshot 完成後に削除する volume」を回収。
 #     snapshot 完成は数分かかり Worker の 1 invocation では待ち切れないため、stop.ts は KV に
@@ -43,12 +51,6 @@ id = "<YOUR_KV_SERVER_STATE_ID>"
 #     (DLM 不採用、docs/iac-migration-plan.md Step 6)。
 [triggers]
 crons = ["*/5 * * * *"]
-#
-# ---- 今は使わない (Phase 2 以降で実体作成して uncomment) ----
-#
-# [[kv_namespaces]]
-# binding = "GAME_REGISTRY"
-# id = "TBD"           # `wrangler kv namespace create GAME_REGISTRY` で発行された ID
 #
 # idle 検知フォールバック (Phase 3) を足すときは上の crons 配列にエントリを追加する:
 #   crons = ["*/5 * * * *", "0 * * * *"]

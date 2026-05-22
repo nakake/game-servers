@@ -120,11 +120,14 @@ if (!hasKvBinding) {
   }
 } else {
   // value は registry.json ファイルそのもの。先に cf_record_id を書き戻してあるので最新版が入る。
+  // wrangler は discord-handler の devDependency なので `pnpm exec` 経由で起動する
+  // (bare `wrangler` は PATH に無い)。cwd=wranglerDir で wrangler.toml の binding を解決させる。
+  // `kv key put` はデフォルトで remote namespace を対象にする (`--local` で上書き) ため
+  // `--remote` は付けない — このフラグは無く、付けると key 位置引数を食ってしまう。
   run(
     [
-      'wrangler', 'kv', 'key', 'put',
+      'pnpm', 'exec', 'wrangler', 'kv', 'key', 'put',
       '--binding', 'GAME_REGISTRY',
-      '--remote',
       gameId,
       '--path', registryPath,
     ],
@@ -225,8 +228,14 @@ function run(argv, cwd) {
     return;
   }
   log(`$ ${printable}`);
-  // Windows では aws/wrangler が .cmd のため shell 経由で起動する。
-  execFileSync(argv[0], argv.slice(1), { stdio: 'inherit', cwd, shell: true });
+  try {
+    // Windows では aws/wrangler が .cmd のため shell 経由で起動する。
+    execFileSync(argv[0], argv.slice(1), { stdio: 'inherit', cwd, shell: true });
+  } catch (err) {
+    // 子プロセスの stderr は stdio:'inherit' で既に表示済み。Node のスタックトレースは
+    // 抑止し、どのコマンドが何で落ちたかだけを 1 行で示す。
+    fail(`command failed (exit ${err.status ?? '?'}): ${printable}`);
+  }
 }
 
 function rel(p) {

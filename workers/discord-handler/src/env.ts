@@ -63,6 +63,10 @@ export interface Env {
   // optional: 未バインドなら ready 通知は webhook のみ (元メッセージ編集 + mention を skip)。
   // 実体作成: `wrangler kv namespace create SERVER_STATE` → wrangler.toml に id を記載。
   SERVER_STATE?: KVNamespace;
-  // GAME_REGISTRY は Phase 2 で registry.json を KV 化する際に追加予定。
-  // GAME_REGISTRY: KVNamespace;
+  // GAME_REGISTRY: ゲーム定義 (registry.json) の source of truth。
+  // key=<game_id> / value=GameDefinition の JSON。register-game.mjs が投入し、Worker は
+  // lib/registry/store.ts 経由で読む。SERVER_STATE と違い必須 — これが無いと全コマンドが
+  // 機能しないため graceful degradation はしない。
+  // 実体作成: `wrangler kv namespace create GAME_REGISTRY` → wrangler.toml に id を記載。
+  GAME_REGISTRY: KVNamespace;
 }
