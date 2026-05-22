@@ -11,8 +11,9 @@ Worker は ATM11 をハードコードした最小実装になっており、こ
 各 Step は独立して動作確認でき、Worker のコード変更の有無を明示する。Step 完了ごとに本
 ドキュメントの該当 checkbox を埋めて進捗を見える化する (iac-migration-plan.md と同じ運用)。
 
-> **進捗 (2026-05-22)**: 計画策定完了。Step 1〜3 完了 (`register-game.mjs` / スキーマ +
-> registry バックフィル / `GAME_REGISTRY` KV 作成 + atm11 投入)。Step 4〜8 未着手。
+> **進捗 (2026-05-22)**: 計画策定完了。Step 1〜4 完了 (`register-game.mjs` / スキーマ +
+> registry バックフィル / `GAME_REGISTRY` KV 作成 + atm11 投入 / Worker を registry 駆動に
+> 切替)。Step 5〜8 未着手。
 
 ## 関連ドキュメント
 
@@ -129,34 +130,42 @@ Worker コード変更: `types.ts` の型定義のみ。挙動変化なし。
 
 Worker コード変更: `env.ts` の binding 宣言のみ。挙動変化なし (デプロイは Step 6 まで保留)。
 
-### Step 4: Worker を registry 駆動に切替  *(未着手)*
+### Step 4: Worker を registry 駆動に切替  *(完了 2026-05-22)*
 
 本 Phase で最大の変更。`atm11.ts` の build-time import を KV 読み出しに置き換える。
 
-- [ ] `lib/registry/store.ts` 新規: `getGame(env, id): Promise<GameDefinition | undefined>` /
-      `listGames(env): Promise<GameDefinition[]>` — `env.GAME_REGISTRY` から読む
-- [ ] `lib/registry/atm11.ts` を削除
-- [ ] consumer を `store.ts` 経由に切替: `handlers/discord/list.ts` / `start.ts` / `stop.ts` /
+- [x] `lib/registry/store.ts` 新規: `getGame(kv, id)` / `listGames(kv)`。`KVNamespace` を直接
+      受け取る (`Env` 全体ではなく) — `lib/state/pending-*.ts` と同じ流儀
+- [x] `lib/registry/atm11.ts` を削除
+- [x] consumer を `store.ts` 経由に切替: `handlers/discord/list.ts` / `start.ts` / `stop.ts` /
       `handlers/snapshot-retention.ts` / `handlers/aws-notification.ts`
-- [ ] handler の async 化: `discord.ts` の `dispatchCommand` を `Promise<Response>` に /
-      `handleListCommand` を async に (KV get は数 ms、Discord 3 秒制約内に収まる)
-- [ ] `stop.ts` の `extractGameOption(...) ?? 'atm11'` デフォルトを撤去
-- [ ] env vars 移管:
+- [x] handler の async 化: `discord.ts` の `dispatchCommand` を `Promise<Response>` に /
+      `handleListCommand` / `handleStartCommand` / `handleStopCommand` を async に
+      (KV get を await してから deferred/error を返す。KV get は数 ms で 3 秒制約内)
+- [x] `stop.ts` の `?? 'atm11'` デフォルトを撤去 (game 引数省略時はエラー応答)
+- [x] env vars 移管:
   - `ATM11_CF_RECORD_ID` → `game.cf_record_id`
   - `ATM11_RCON_PASSWORD_SSM_PATH` → `game.env.RCON_PASSWORD_FROM_SSM` (registry に既出)
   - `ATM11_SNAPSHOT_ID` → `game.seed_snapshot_id` (無ければ blank EBS)
   - `LAUNCHER_TARBALL_S3_URI` → `config_s3_prefix` の bucket + `launcher/<id>.tar.gz` で導出
-- [ ] `env.ts` / `wrangler.toml [vars]` から上記 4 vars を削除
-- [ ] `lib/aws/ec2.ts`: `blockDeviceMappings.ebs.snapshotId` を optional 化 (blank EBS 起動用)
-- [ ] `lib/launcher/user-data.ts`:
-  - `buildAtm11UserData` → `buildUserData` にリネーム
-  - **blank EBS 対応**: `blkid` も partition も無い真の空ボリュームなら `mkfs.ext4` してから
-    mount する分岐を追加 (snapshot 復元ボリュームには絶対に `mkfs` しない — 最後の else のみ)
-  - **pull 対応**: `image_source === "pull"` なら tarball 取得 + `docker build` をスキップして
-    `docker pull ${container_image}` → `docker run`。`build` は従来どおり
-- [ ] `pnpm typecheck` / `wrangler deploy --dry-run` 通過
+        (`buildUserData` 内で導出)
+- [x] `env.ts` / `wrangler.toml [vars]` から上記 4 vars を削除
+- [x] `lib/aws/ec2.ts`: 変更不要 — `BlockDeviceMapping.ebs.snapshotId` は既に optional で、
+      `buildRunInstancesParams` も未指定なら `Ebs.SnapshotId` を emit しない (= blank volume)
+- [x] `lib/launcher/user-data.ts`:
+  - `buildAtm11UserData` → `buildUserData` にリネーム。opts はゲーム差を `game` に集約し
+    `{ game, awsRegion, formatBlankVolume, readyNotifySnsTopicArn?, fqdn? }` に簡素化
+  - **blank EBS 対応**: `blkid` も partition も無い真の空ボリュームを `formatBlankVolume`
+    true のとき `mkfs.ext4 -F` してから mount (snapshot 復元時は触らない — 最後の else のみ)。
+    新規ボリュームは container (uid 1000) が書けるよう `chown` する
+  - **pull 対応**: `image_source === "pull"` は tarball 取得 + `docker build` をスキップして
+    `docker pull` → `docker run`。`build` は従来どおり tarball + `docker build`
+- [x] あわせて `handlers/admin.ts` の `containerName ?? 'atm11'` を撤去 (containerName 必須化)
+      — Worker ソースから最後の `atm11` リテラルを除去
+- [x] `pnpm typecheck` / `wrangler deploy --dry-run` 通過 (bindings に GAME_REGISTRY が出現、
+      ATM11_*/LAUNCHER vars が消えたことを確認)
 
-Worker コード変更: **あり (大)**。
+Worker コード変更: **あり (大)**。デプロイは Step 6。
 
 ### Step 5: Discord コマンドの autocomplete 化  *(未着手)*
 

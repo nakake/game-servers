@@ -26,7 +26,7 @@ import {
   GAME_WORLD_SNAPSHOT_TAG_KEY,
   GAME_WORLD_SNAPSHOT_TAG_VALUE,
 } from '../lib/aws/index.js';
-import { allGames } from '../lib/registry/atm11.js';
+import { listGames } from '../lib/registry/store.js';
 import type { Env } from '../env.js';
 
 export async function handleSnapshotRetention(env: Env): Promise<void> {
@@ -38,7 +38,8 @@ export async function handleSnapshotRetention(env: Env): Promise<void> {
     },
   });
 
-  for (const game of allGames) {
+  const games = await listGames(env.GAME_REGISTRY);
+  for (const game of games) {
     const generations = game.snapshot.generations;
     if (!Number.isInteger(generations) || generations < 1) {
       console.warn(

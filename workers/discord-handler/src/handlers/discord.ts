@@ -49,11 +49,16 @@ export async function handleDiscordInteraction(
   });
 }
 
-function dispatchCommand(interaction: Interaction, env: Env, ctx: ExecutionContext): Response {
+// registry が KV 化されたため /list /start /stop は KV get を伴う非同期処理になった。
+async function dispatchCommand(
+  interaction: Interaction,
+  env: Env,
+  ctx: ExecutionContext,
+): Promise<Response> {
   const commandName = interaction.data?.name;
   switch (commandName) {
     case 'list':
-      return handleListCommand();
+      return handleListCommand(env);
     case 'start':
       return handleStartCommand(interaction, env, ctx);
     case 'stop':

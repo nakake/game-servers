@@ -26,19 +26,25 @@ import {
   InteractionResponseType,
   type Interaction,
 } from '../../lib/discord/types.js';
-import { getGameById } from '../../lib/registry/atm11.js';
+import { getGame } from '../../lib/registry/store.js';
+import type { GameDefinition } from '../../lib/registry/types.js';
 import type { Env } from '../../env.js';
 
 const STOP_PLACEHOLDER_IP = '0.0.0.0';
 
-export function handleStopCommand(
+export async function handleStopCommand(
   interaction: Interaction,
   env: Env,
   ctx: ExecutionContext,
-): Response {
-  // Phase 1 hardcode: 引数省略時は ATM11 を仮定 (現状 1 ゲームしか登録されていない)。
-  const gameId = extractGameOption(interaction) ?? 'atm11';
-  const game = getGameById(gameId);
+): Promise<Response> {
+  const gameId = extractGameOption(interaction);
+  if (gameId === undefined) {
+    return Response.json({
+      type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
+      data: { content: '❌ 停止するゲームを指定してください' },
+    });
+  }
+  const game = await getGame(env.GAME_REGISTRY, gameId);
   if (game === undefined) {
     return Response.json({
       type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
@@ -46,7 +52,7 @@ export function handleStopCommand(
     });
   }
 
-  ctx.waitUntil(executeStop(game.game_id, interaction, env));
+  ctx.waitUntil(executeStop(game, interaction, env));
 
   return Response.json({
     type: InteractionResponseType.DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE,
@@ -59,17 +65,17 @@ function extractGameOption(interaction: Interaction): string | undefined {
   return typeof option?.value === 'string' ? option.value : undefined;
 }
 
-async function executeStop(gameId: string, interaction: Interaction, env: Env): Promise<void> {
+async function executeStop(
+  game: GameDefinition,
+  interaction: Interaction,
+  env: Env,
+): Promise<void> {
   const followUp = new DiscordFollowUpClient({
     applicationId: env.DISCORD_APPLICATION_ID,
     interactionToken: interaction.token,
   });
 
-  const game = getGameById(gameId);
-  if (game === undefined) {
-    await safeEdit(followUp, `❌ registry lookup failed: ${gameId}`);
-    return;
-  }
+  const gameId = game.game_id;
 
   const ec2 = new AwsApiClient({
     region: env.AWS_REGION ?? 'ap-northeast-1',
@@ -180,7 +186,7 @@ async function executeStop(gameId: string, interaction: Interaction, env: Env): 
       const fqdn = `${game.subdomain}.${env.CLOUDFLARE_BASE_DOMAIN}`;
       await cf.updateRecord({
         zoneId: env.CLOUDFLARE_ZONE_ID,
-        recordId: env.ATM11_CF_RECORD_ID,
+        recordId: game.cf_record_id,
         type: 'A',
         name: fqdn,
         content: STOP_PLACEHOLDER_IP,

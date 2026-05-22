@@ -34,7 +34,10 @@ export async function handleAdminDockerStop(request: Request, env: Env): Promise
   if (typeof body.instanceId !== 'string' || body.instanceId.length === 0) {
     return Response.json({ error: '"instanceId" is required' }, { status: 400 });
   }
-  const containerName = body.containerName ?? 'atm11';
+  if (typeof body.containerName !== 'string' || body.containerName.length === 0) {
+    return Response.json({ error: '"containerName" is required' }, { status: 400 });
+  }
+  const containerName = body.containerName;
   const graceSeconds = body.graceSeconds ?? 60;
 
   const client = new AwsApiClient({

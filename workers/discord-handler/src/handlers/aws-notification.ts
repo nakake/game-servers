@@ -14,7 +14,7 @@
 // 参照: https://docs.aws.amazon.com/sns/latest/dg/sns-http-https-endpoint-as-subscriber.html
 
 import { DiscordFollowUpClient } from '../lib/discord/follow-up.js';
-import { getGameById } from '../lib/registry/atm11.js';
+import { getGame } from '../lib/registry/store.js';
 import {
   isNotification,
   isSubscriptionConfirmation,
@@ -85,7 +85,10 @@ async function handleNotification(
 ): Promise<Response> {
   // ゲーム起動完了通知か判定 (Subject = "<game_id> ready" かつ既知の game)。
   const readyGameId = parseGameReadySubject(msg.Subject);
-  if (readyGameId !== undefined && getGameById(readyGameId) !== undefined) {
+  if (
+    readyGameId !== undefined &&
+    (await getGame(env.GAME_REGISTRY, readyGameId)) !== undefined
+  ) {
     // Discord への配信は API を数回叩くので waitUntil で後追いし、SNS には即 200 を返す。
     // (502 等を返すと SNS が再送し、ready メッセージが重複投稿されるため。)
     ctx.waitUntil(deliverGameReady(readyGameId, env));
@@ -133,7 +136,7 @@ function parseGameReadySubject(subject: string | undefined): string | undefined 
 // interaction token は 15 分で失効する。ATM11 初回ブートは mod ロードで 15 分を超える
 // ことがあり、その場合 1.2 は webhook フォールバックに落ちる (元メッセージ編集は skip)。
 async function deliverGameReady(gameId: string, env: Env): Promise<void> {
-  const game = getGameById(gameId);
+  const game = await getGame(env.GAME_REGISTRY, gameId);
   if (game === undefined) {
     return;
   }

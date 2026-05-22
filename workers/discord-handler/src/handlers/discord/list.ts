@@ -1,13 +1,15 @@
-// /list — ゲーム一覧を即時 response で返す。
+// /list — 登録ゲーム一覧を即時 response で返す。
 //
-// Phase 1 hardcode: registry.json から直接読む (現在は ATM11 のみ)。
-// Phase 2 で Workers KV から取得する形に切り替える。
+// GAME_REGISTRY KV から読む (Phase 2)。KV get は数 ms で済むため、Discord の 3 秒制約内に
+// 同期 await して即時 response (type 4) を返せる。
 
-import { allGames } from '../../lib/registry/atm11.js';
+import { listGames } from '../../lib/registry/store.js';
 import { InteractionResponseType } from '../../lib/discord/types.js';
+import type { Env } from '../../env.js';
 
-export function handleListCommand(): Response {
-  const enabled = allGames.filter((g) => g.enabled);
+export async function handleListCommand(env: Env): Promise<Response> {
+  const games = await listGames(env.GAME_REGISTRY);
+  const enabled = games.filter((g) => g.enabled);
   if (enabled.length === 0) {
     return Response.json({
       type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,

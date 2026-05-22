@@ -1,6 +1,6 @@
 // /status — 現在 running な game サーバーの状態を即時 response で返す。
 //
-// Phase 1 hardcode: Project=game-servers タグで全 running を検索 (登録は ATM11 のみ)。
+// Project=game-servers タグで running な全インスタンスを検索する (registry に依存しない)。
 // AWS API を 1 回叩くので CPU 時間は短い (deferred 不要)。
 
 import {

@@ -20,18 +20,19 @@ import {
   InteractionResponseType,
   type Interaction,
 } from '../../lib/discord/types.js';
-import { base64EncodeUserData, buildAtm11UserData } from '../../lib/launcher/user-data.js';
-import { getGameById } from '../../lib/registry/atm11.js';
+import { base64EncodeUserData, buildUserData } from '../../lib/launcher/user-data.js';
+import { getGame } from '../../lib/registry/store.js';
+import type { GameDefinition } from '../../lib/registry/types.js';
 import { storePendingReady } from '../../lib/state/pending-ready.js';
 import type { Env } from '../../env.js';
 
-export function handleStartCommand(
+export async function handleStartCommand(
   interaction: Interaction,
   env: Env,
   ctx: ExecutionContext,
-): Response {
+): Promise<Response> {
   const gameId = extractGameOption(interaction);
-  const game = gameId !== undefined ? getGameById(gameId) : undefined;
+  const game = gameId !== undefined ? await getGame(env.GAME_REGISTRY, gameId) : undefined;
   if (game === undefined) {
     return Response.json({
       type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
@@ -46,7 +47,7 @@ export function handleStartCommand(
   }
 
   // 重い処理は waitUntil で後追い。Discord には先に deferred response を返す。
-  ctx.waitUntil(executeStart(game.game_id, interaction, env));
+  ctx.waitUntil(executeStart(game, interaction, env));
 
   return Response.json({
     type: InteractionResponseType.DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE,
@@ -59,17 +60,17 @@ function extractGameOption(interaction: Interaction): string | undefined {
   return typeof option?.value === 'string' ? option.value : undefined;
 }
 
-async function executeStart(gameId: string, interaction: Interaction, env: Env): Promise<void> {
+async function executeStart(
+  game: GameDefinition,
+  interaction: Interaction,
+  env: Env,
+): Promise<void> {
   const followUp = new DiscordFollowUpClient({
     applicationId: env.DISCORD_APPLICATION_ID,
     interactionToken: interaction.token,
   });
 
-  const game = getGameById(gameId);
-  if (game === undefined) {
-    await safeEdit(followUp, `❌ registry lookup failed: ${gameId}`);
-    return;
-  }
+  const gameId = game.game_id;
 
   const ec2 = new AwsApiClient({
     region: env.AWS_REGION ?? 'ap-northeast-1',
@@ -101,12 +102,13 @@ async function executeStart(gameId: string, interaction: Interaction, env: Env):
     //      その他    → 最新の completed snapshot にフォールバック
     //    snapshot が 1 つも無ければ env seed (= 初回起動時の Phase 0 snapshot)。
     const snapshotTags = { Game: gameId, Purpose: 'game-world' };
+    const seedSnapshotId = game.seed_snapshot_id ?? undefined;
     const latest = await getLatestSnapshot(ec2, snapshotTags);
-    let snapshotId: string;
+    let snapshotId: string | undefined;
     let snapshotNote: string;
     if (latest === undefined) {
-      snapshotId = env.ATM11_SNAPSHOT_ID;
-      snapshotNote = `env seed \`${snapshotId}\` (初回起動)`;
+      snapshotId = seedSnapshotId;
+      snapshotNote = describeSeed(seedSnapshotId);
     } else if (latest.state === 'completed') {
       snapshotId = latest.snapshotId;
       snapshotNote = `latest \`${snapshotId}\` (${latest.startTime})`;
@@ -129,30 +131,30 @@ async function executeStart(gameId: string, interaction: Interaction, env: Env):
       } catch (err) {
         console.error('waitForSnapshotCompleted failed, falling back:', err);
         const completed = await getLatestCompletedSnapshot(ec2, snapshotTags);
-        snapshotId = completed?.snapshotId ?? env.ATM11_SNAPSHOT_ID;
+        snapshotId = completed?.snapshotId ?? seedSnapshotId;
         snapshotNote = completed !== undefined
-          ? `fallback latest completed \`${snapshotId}\``
-          : `env seed \`${snapshotId}\``;
+          ? `fallback latest completed \`${completed.snapshotId}\``
+          : describeSeed(seedSnapshotId);
       }
     } else {
       // error / recoverable / recovering — 最新の completed にフォールバック。
       const completed = await getLatestCompletedSnapshot(ec2, snapshotTags);
-      snapshotId = completed?.snapshotId ?? env.ATM11_SNAPSHOT_ID;
+      snapshotId = completed?.snapshotId ?? seedSnapshotId;
       snapshotNote = completed !== undefined
-        ? `latest completed \`${snapshotId}\` (最新 snapshot は ${latest.state})`
-        : `env seed \`${snapshotId}\``;
+        ? `latest completed \`${completed.snapshotId}\` (最新 snapshot は ${latest.state})`
+        : describeSeed(seedSnapshotId);
     }
     await safeEdit(followUp, `⏳ snapshot 確定: ${snapshotNote}、EC2 起動中…`);
 
-    // 3. user-data 生成 (EBS mount → S3 から launcher tarball → SSM から RCON pw → docker build/run)
+    // user-data 生成 (EBS mount → image 準備 → SSM から RCON pw → docker run)。
+    // ゲーム差 (build/pull、blank EBS の要否) は buildUserData が registry から判断する。
     const awsRegion = env.AWS_REGION ?? 'ap-northeast-1';
     const fqdn = `${game.subdomain}.${env.CLOUDFLARE_BASE_DOMAIN}`;
     const userData = base64EncodeUserData(
-      buildAtm11UserData({
+      buildUserData({
         game,
-        launcherTarballS3Uri: env.LAUNCHER_TARBALL_S3_URI,
-        rconPasswordSsmPath: env.ATM11_RCON_PASSWORD_SSM_PATH,
         awsRegion,
+        formatBlankVolume: snapshotId === undefined,
         fqdn,
         ...(env.SNS_ALLOWED_TOPIC_ARN !== undefined && env.SNS_ALLOWED_TOPIC_ARN !== ''
           ? { readyNotifySnsTopicArn: env.SNS_ALLOWED_TOPIC_ARN }
@@ -194,7 +196,8 @@ async function executeStart(gameId: string, interaction: Interaction, env: Env):
         {
           deviceName: '/dev/sdf',
           ebs: {
-            snapshotId,
+            // snapshotId 未指定 = blank volume (user-data が mkfs.ext4 する)
+            ...(snapshotId !== undefined ? { snapshotId } : {}),
             volumeSize: game.ebs_size_gb,
             volumeType: 'gp3',
             deleteOnTermination: false,
@@ -225,7 +228,7 @@ async function executeStart(gameId: string, interaction: Interaction, env: Env):
     // 4. Cloudflare DNS 更新
     await cf.updateRecord({
       zoneId: env.CLOUDFLARE_ZONE_ID,
-      recordId: env.ATM11_CF_RECORD_ID,
+      recordId: game.cf_record_id,
       type: 'A',
       name: fqdn,
       content: inst.publicIp,
@@ -267,6 +270,13 @@ async function executeStart(gameId: string, interaction: Interaction, env: Env):
     const msg = err instanceof Error ? err.message : String(err);
     await safeEdit(followUp, `❌ \`/start ${gameId}\` failed: ${msg.slice(0, 500)}`);
   }
+}
+
+// snapshot が 1 つも無いときの note 文言 (registry の seed を使うか blank EBS か)。
+function describeSeed(seedSnapshotId: string | undefined): string {
+  return seedSnapshotId !== undefined
+    ? `registry seed \`${seedSnapshotId}\` (初回起動)`
+    : 'blank EBS (初回起動、空ボリュームを mkfs)';
 }
 
 // follow-up が失敗しても処理を継続するためのラッパ。

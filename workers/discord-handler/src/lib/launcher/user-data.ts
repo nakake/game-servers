@@ -1,13 +1,17 @@
 // EC2 起動時の cloud-init script (user-data) 生成。
 //
-// Phase 1 hardcode 構成:
-//   0. docker install (AL2023 は docker 同梱なし)
-//   1. EBS volume (/dev/nvme1n1) を /opt/<game_id> に mount
-//   2. S3 から launcher tarball (launcher/images/<game_id>.tar.gz) を取得して /opt/launcher/<game_id>/ に展開
-//   3. SSM Parameter Store から RCON_PASSWORD を取得
-//   4. docker build → docker run (image registry は使わず、EC2 で都度 build)
+// registry.json (GameDefinition) 駆動。ゲーム差は registry に閉じ、この関数は分岐するだけ:
+//   - image_source "build": launcher tarball を S3 から取得し EC2 上で docker build
+//   - image_source "pull" : container_image を docker pull
+//   - seed snapshot 無しの初回起動 (formatBlankVolume): 空 EBS を mkfs.ext4 で初期化
 //
-// Phase 4 で AMI に image を焼き込んで docker build を skip する想定。
+// 構成:
+//   0. docker install (AL2023 は docker 同梱なし)
+//   1. EBS volume (/dev/nvme1n1) を /opt/<game_id> に mount (空なら mkfs)
+//   2. コンテナイメージ準備 (build: tarball 取得 + docker build / pull: docker pull)
+//   3. RCON_PASSWORD を SSM Parameter Store から取得 (registry env に SSM 参照があれば)
+//   4. docker run
+//   5. ready 検知 → SNS publish
 //
 // user-data は EC2 内で root として実行され、出力は /var/log/cloud-init-output.log に残る。
 
@@ -15,12 +19,11 @@ import type { GameDefinition } from '../registry/types.js';
 
 export interface BuildUserDataOptions {
   game: GameDefinition;
-  // launcher tarball を置く S3 URI (例: s3://gs-game-configs/launcher/atm11.tar.gz)
-  launcherTarballS3Uri: string;
-  // RCON password の SSM Parameter Store パス (例: /gs/atm11/rcon_password)
-  rconPasswordSsmPath: string;
-  // AWS リージョン
+  // AWS リージョン (aws CLI 呼び出し用)
   awsRegion: string;
+  // snapshot 指定なし起動 = 空 EBS。true なら filesystem が無いとき mkfs.ext4 する。
+  // start.ts が「復元元 snapshot 無し」と判断したときだけ true にする。
+  formatBlankVolume: boolean;
   // ready 通知用 SNS Topic ARN (未指定なら通知 step を skip)
   readyNotifySnsTopicArn?: string;
   // ready 通知に出す FQDN (例: atm11.example.com)
@@ -30,25 +33,40 @@ export interface BuildUserDataOptions {
 // /dev/sdf で attach した EBS は EC2 内で /dev/nvme1n1 として見える。
 const EBS_DEVICE = '/dev/nvme1n1';
 
-// MC 起動完了 polling のパラメータ。ATM11 初回ブートは mod ロードで 10 分超に
+// container (itzg/minecraft-server 系) が /data に書けるよう新規ボリュームを chown する uid。
+const CONTAINER_UID = 1000;
+
+// MC 起動完了 polling のパラメータ。modded の初回ブートは mod ロードで 10 分超に
 // なることがあるため余裕を持たせる (5s * 240 = 20 分)。
 const READY_POLL_INTERVAL_SEC = 5;
 const READY_POLL_COUNT = 240;
 
-export function buildAtm11UserData(opts: BuildUserDataOptions): string {
-  const { game, launcherTarballS3Uri, rconPasswordSsmPath, awsRegion, readyNotifySnsTopicArn, fqdn } = opts;
+export function buildUserData(opts: BuildUserDataOptions): string {
+  const { game, awsRegion, formatBlankVolume, readyNotifySnsTopicArn, fqdn } = opts;
   const containerName = game.game_id;
   const dataDir = `/opt/${game.game_id}`;
   const launcherDir = `/opt/launcher/${game.game_id}`;
   const port = game.ports[0]?.port ?? 25565;
   const endpoint = fqdn !== undefined ? `${fqdn}:${port}` : `<public-ip>:${port}`;
 
-  // env から container に渡す: registry.json の env を踏襲しつつ、
-  // RCON_PASSWORD は SSM から動的取得した値を入れる。
+  // RCON password の SSM path。registry env の RCON_PASSWORD_FROM_SSM (SSM 参照 hint)。
+  // 無いゲームは RCON 無しとして SSM 取得 step ごと skip する。
+  const rconSsmPath = game.env.RCON_PASSWORD_FROM_SSM;
+
+  // container に渡す env: registry.json の env を踏襲。RCON_PASSWORD_FROM_SSM は SSM 参照
+  // hint なので container には渡さない (実値は SSM から取得して RCON_PASSWORD で渡す)。
   const envFromRegistry = Object.entries(game.env)
-    .filter(([key]) => key !== 'RCON_PASSWORD_FROM_SSM') // SSM 参照 hint は container には渡さない
+    .filter(([key]) => key !== 'RCON_PASSWORD_FROM_SSM')
     .map(([key, value]) => `  -e ${shellEscape(key)}=${shellEscape(value)}`)
     .join(' \\\n');
+
+  const isBuild = game.image_source === 'build';
+  // docker run で参照する image。build はローカルビルド tag、pull は registry の image。
+  const imageRef = isBuild ? `${containerName}-server:dev` : game.container_image;
+  // build モードのみ launcher tarball を使う。config_s3_prefix の bucket から導出する。
+  const launcherTarballS3Uri = isBuild
+    ? deriveLauncherTarballUri(game.config_s3_prefix, game.game_id)
+    : '';
 
   return `#!/bin/bash
 set -euxo pipefail
@@ -56,7 +74,7 @@ set -euxo pipefail
 LOG_FILE=/var/log/gs-userdata.log
 exec > >(tee -a "$LOG_FILE") 2>&1
 
-echo "[user-data] start: game=${game.game_id}"
+echo "[user-data] start: game=${game.game_id} image_source=${game.image_source}"
 
 # ---- 0. docker install + start (AL2023 は docker 同梱なし) ----
 dnf install -y docker
@@ -73,44 +91,68 @@ for i in $(seq 1 30); do
 done
 # clean snapshot (filesystem on raw block device) と partitioned snapshot (root-volume 由来で
 # /boot/efi が auto-mount される) の両方を扱えるように mount 対象を動的決定する。
-# 過去の /stop バグで partition 入り snapshot 系統が混入したため。
 if blkid ${EBS_DEVICE} > /dev/null 2>&1; then
   MOUNT_SRC=${EBS_DEVICE}
+  FORMATTED=0
 elif [ -b ${EBS_DEVICE}p1 ]; then
   MOUNT_SRC=${EBS_DEVICE}p1
+  FORMATTED=0
   # auto-mount された /boot/efi (p128) を外しておかないと unmount 漏れで /stop 時に困る
   if mountpoint -q /boot/efi 2>/dev/null && [ "$(findmnt -n -o SOURCE /boot/efi)" = "${EBS_DEVICE}p128" ]; then
     umount /boot/efi || true
   fi
 else
-  echo "[user-data] no mountable filesystem on ${EBS_DEVICE}"
-  exit 1
+${
+    formatBlankVolume
+      ? `  # snapshot 指定なしの初回起動。空ボリュームを ext4 で初期化する。
+  echo "[user-data] no filesystem on ${EBS_DEVICE} — formatting ext4 (first boot)"
+  mkfs.ext4 -F ${EBS_DEVICE}
+  MOUNT_SRC=${EBS_DEVICE}
+  FORMATTED=1`
+      : `  echo "[user-data] no mountable filesystem on ${EBS_DEVICE}"
+  exit 1`
+  }
 fi
 mount $MOUNT_SRC ${dataDir}
 echo "[user-data] mounted $MOUNT_SRC -> ${dataDir}"
+# 新規フォーマットしたボリュームは root 所有。container (uid ${CONTAINER_UID}) が
+# /data に書けるよう chown する。snapshot 復元時は所有権を保持したいので触らない。
+if [ "$FORMATTED" = "1" ]; then
+  chown ${CONTAINER_UID}:${CONTAINER_UID} ${dataDir}
+  echo "[user-data] chown ${dataDir} -> uid ${CONTAINER_UID} (new volume)"
+fi
 
-# ---- 2. launcher tarball を S3 から取得 + 展開 ----
+# ---- 2. コンテナイメージ準備 ----
+${
+    isBuild
+      ? `# build: launcher tarball を S3 から取得 + 展開 → docker build
 mkdir -p ${launcherDir}
 aws s3 cp ${launcherTarballS3Uri} /tmp/launcher.tar.gz --region ${awsRegion}
 tar -xzf /tmp/launcher.tar.gz -C ${launcherDir}
 rm /tmp/launcher.tar.gz
 echo "[user-data] launcher extracted to ${launcherDir}"
-ls ${launcherDir}
+cd ${launcherDir}
+docker build -t ${imageRef} .
+echo "[user-data] image built: ${imageRef}"`
+      : `# pull: registry の container_image を docker pull
+docker pull ${game.container_image}
+echo "[user-data] image pulled: ${game.container_image}"`
+  }
 
 # ---- 3. RCON_PASSWORD を SSM Parameter Store から取得 ----
-RCON_PASSWORD=$(aws ssm get-parameter \\
-  --name ${rconPasswordSsmPath} \\
+${
+    rconSsmPath !== undefined
+      ? `RCON_PASSWORD=$(aws ssm get-parameter \\
+  --name ${rconSsmPath} \\
   --with-decryption \\
   --region ${awsRegion} \\
   --query 'Parameter.Value' \\
   --output text)
-echo "[user-data] RCON_PASSWORD fetched from SSM (length=\${#RCON_PASSWORD})"
+echo "[user-data] RCON_PASSWORD fetched from SSM (length=\${#RCON_PASSWORD})"`
+      : `echo "[user-data] no RCON_PASSWORD_FROM_SSM in registry — skip SSM fetch"`
+  }
 
-# ---- 4. docker build + run ----
-cd ${launcherDir}
-docker build -t ${containerName}-server:dev .
-echo "[user-data] image built"
-
+# ---- 4. docker run ----
 docker run -d \\
   --name ${containerName} \\
   --stop-signal=SIGTERM \\
@@ -118,17 +160,18 @@ docker run -d \\
   -p ${port}:${port}/tcp \\
   -v ${dataDir}:/data \\
 ${envFromRegistry} \\
-  -e RCON_PASSWORD="$RCON_PASSWORD" \\
-  --restart=no \\
-  ${containerName}-server:dev
+${rconSsmPath !== undefined ? '  -e RCON_PASSWORD="$RCON_PASSWORD" \\\n' : ''}  --restart=no \\
+  ${imageRef}
 echo "[user-data] container started"
 
 # ---- 5. ready 検知 (container log で MC 起動完了行を polling) ----
-${readyNotifySnsTopicArn !== undefined ? `
+${
+    readyNotifySnsTopicArn !== undefined
+      ? `
 # docker run -p はホスト側ポートを即 bind するため /dev/tcp での port 検知は
 # docker-proxy に当たって false positive になる (MC 本体が未起動でも accept される)。
-# Forge/NeoForge が起動完了時に出力する 'Done (...)! For help' 行を container log
-# から検知する。
+# Minecraft server (vanilla/Forge/NeoForge) が起動完了時に出力する 'Done (...)! For help'
+# 行を container log から検知する。
 echo "[user-data] waiting for MC server to finish loading"
 for i in $(seq 1 ${READY_POLL_COUNT}); do
   if docker logs ${containerName} 2>&1 | grep -q 'Done ('; then
@@ -147,8 +190,20 @@ for i in $(seq 1 ${READY_POLL_COUNT}); do
   fi
   sleep ${READY_POLL_INTERVAL_SEC}
 done
-` : `# ready 通知 skip (SNS topic ARN 未指定)`}
+`
+      : `# ready 通知 skip (SNS topic ARN 未指定)`
+  }
 `;
+}
+
+// config_s3_prefix (例: s3://gs-game-configs/atm11/) の bucket を取り出し、
+// launcher tarball の URI s3://<bucket>/launcher/<game_id>.tar.gz を組み立てる。
+function deriveLauncherTarballUri(configS3Prefix: string, gameId: string): string {
+  const match = /^s3:\/\/([^/]+)\//.exec(configS3Prefix);
+  if (match === null || match[1] === undefined) {
+    throw new Error(`cannot derive S3 bucket from config_s3_prefix: ${configS3Prefix}`);
+  }
+  return `s3://${match[1]}/launcher/${gameId}.tar.gz`;
 }
 
 // shell 用エスケープ (single-quoted 文字列に埋め込む)。

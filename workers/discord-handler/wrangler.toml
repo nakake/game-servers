@@ -20,11 +20,9 @@ CLOUDFLARE_BASE_DOMAIN = "example.com"
 # Launch Template (gs-game-server) 側。値は `infra/tf.ps1 output launch_template_id`。
 EC2_LAUNCH_TEMPLATE_ID = "<YOUR_LAUNCH_TEMPLATE_ID>"
 EC2_SUBNET_ID = "<YOUR_SUBNET_ID>"
-ATM11_SNAPSHOT_ID = "<YOUR_SEED_SNAPSHOT_ID>"
-ATM11_CF_RECORD_ID = "<YOUR_CF_RECORD_ID>"
-ATM11_RCON_PASSWORD_SSM_PATH = "/gs/atm11/rcon_password"
-LAUNCHER_TARBALL_S3_URI = "s3://gs-game-configs/launcher/atm11.tar.gz"
 SNS_ALLOWED_TOPIC_ARN = "arn:aws:sns:ap-northeast-1:123456789012:gs-alerts"
+# ゲーム固有の値 (snapshot seed / cf_record_id / RCON SSM パス / launcher tarball) は
+# Phase 2 で registry.json (GAME_REGISTRY KV) に移管。ここには持たない。
 
 # ---- SERVER_STATE KV ----
 # 2 用途で使う:
