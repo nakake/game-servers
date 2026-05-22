@@ -18,6 +18,10 @@ export interface GameDefinition {
 
   instance_types: string[];
   ebs_size_gb: number;
+  // 初回起動の種 snapshot。null / 未指定なら blank EBS を mkfs して起動する。
+  // Phase 0 で手動作成した snapshot を一度だけ使う用途。以降は /stop が作る
+  // game-world snapshot が優先されるため、実質的にブートストラップ専用。
+  seed_snapshot_id?: string | null;
   spot_max_price_jpy_per_hour: number | null;
 
   subdomain: string;
@@ -26,6 +30,10 @@ export interface GameDefinition {
 
   container_image: string;
   container_image_note?: string;
+  // EC2 でのコンテナ取得方法。
+  //   "build": launcher tarball を S3 から取得し EC2 上で docker build (自前イメージ)
+  //   "pull" : container_image を docker pull (公開イメージで完結するゲーム)
+  image_source: 'build' | 'pull';
   env: Record<string, string>;
   config_s3_prefix: string;
 

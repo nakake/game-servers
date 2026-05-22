@@ -10,16 +10,18 @@
     "m7a.xlarge"
   ],
   "ebs_size_gb": 30,
+  "seed_snapshot_id": "<YOUR_SEED_SNAPSHOT_ID>",
   "spot_max_price_jpy_per_hour": 12,
 
   "subdomain": "atm11",
-  "cf_record_id": "TBD_AFTER_REGISTRATION",
+  "cf_record_id": "<YOUR_CF_RECORD_ID>",
   "ports": [
     { "port": 25565, "proto": "TCP" }
   ],
 
   "container_image": "ghcr.io/game-servers/atm11-server:26.1.2",
   "container_image_note": "itzg/minecraft-server に java25 タグが揃うまでは自前ビルド。Dockerfile は launcher/images/atm11/ 配下。",
+  "image_source": "build",
   "env": {
     "EULA": "TRUE",
     "TYPE": "NEOFORGE",

@@ -11,7 +11,8 @@ Worker は ATM11 をハードコードした最小実装になっており、こ
 各 Step は独立して動作確認でき、Worker のコード変更の有無を明示する。Step 完了ごとに本
 ドキュメントの該当 checkbox を埋めて進捗を見える化する (iac-migration-plan.md と同じ運用)。
 
-> **進捗 (2026-05-22)**: 計画策定完了。Step 1 (`register-game.mjs`) 完了。Step 2〜8 未着手。
+> **進捗 (2026-05-22)**: 計画策定完了。Step 1〜2 完了 (`register-game.mjs` / スキーマ +
+> registry バックフィル)。Step 3〜8 未着手。
 
 ## 関連ドキュメント
 
@@ -95,16 +96,17 @@ CLI、Cloudflare アカウント認証はローカル `wrangler` に委譲。
 
 Worker コード変更: なし。
 
-### Step 2: スキーマ更新 + registry.json バックフィル  *(未着手)*
+### Step 2: スキーマ更新 + registry.json バックフィル  *(完了 2026-05-22)*
 
 KV に投入する前に `registry.json` を最終形にする (Step 3 の投入を 1 回で済ませる)。
 
-- [ ] `types.ts`: `GameDefinition` に `image_source` (必須) と `seed_snapshot_id?` を追加
-- [ ] `games/atm11/registry.json`: `cf_record_id` を実値 `<YOUR_CF_RECORD_ID>` に /
+- [x] `types.ts`: `GameDefinition` に `image_source` (必須) と `seed_snapshot_id?` を追加
+- [x] `games/atm11/registry.json`: `cf_record_id` を実値 `<YOUR_CF_RECORD_ID>` に /
       `seed_snapshot_id: "<YOUR_SEED_SNAPSHOT_ID>"` / `image_source: "build"`
-- [ ] `games/_template/registry.json`: `image_source` (例として `"pull"`) と `seed_snapshot_id: null` を追加
-- [ ] `games/_template/README.md`: 新フィールド 2 つの説明を追記
-- [ ] `pnpm typecheck` 通過 (この時点では Worker はまだ `atm11.ts` の build-time import のまま)
+- [x] `games/_template/registry.json`: `image_source: "pull"` と `seed_snapshot_id: null` を追加
+- [x] `games/_template/README.md`: 新フィールド 2 つの説明を追記。あわせて手順ブロックの
+      stale な `register-game.sh` 参照を `register-game.mjs` に修正 (実装済のため)
+- [x] `pnpm typecheck` 通過 (Worker はまだ `atm11.ts` の build-time import のまま、挙動変化なし)
 
 Worker コード変更: `types.ts` の型定義のみ。挙動変化なし。
 

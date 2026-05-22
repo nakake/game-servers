@@ -9,20 +9,21 @@
 cp -r games/_template games/terraria
 
 # 2. registry.json の REPLACE_ME を実値に書き換え
-#    game_id, display_name, subdomain, ports, container_image, env など
+#    game_id, display_name, subdomain, ports, container_image, image_source, env など
+#    (cf_record_id は register-game.mjs が自動で埋めるので TBD のままでよい)
 
-# 3. enabled: false → true (動作確認後)
-
-# 4. ゲーム固有の設定ファイルを config/ に配置
+# 3. ゲーム固有の設定ファイルを config/ に配置
 #    例: server.properties, user_jvm_args.txt, serverconfig.txt 等
 
-# 5. README.md を上書きしてゲーム固有メモを書く
+# 4. README.md を上書きしてゲーム固有メモを書く
 
-# 6. Cloudflare DNS にサブドメインを作成 (手動 or scripts/register-game.sh)
-#    A レコード作成 → record_id を registry.json の cf_record_id に貼る
+# 5. RCON password を SSM Parameter Store に登録 (minecraft 系)
+#    /gs/<game_id>/rcon_password を SecureString で作成
 
-# 7. Workers KV に registry を投入
-#    scripts/register-game.sh <game_id>  ※Phase 2 で実装予定
+# 6. register-game.mjs で DNS レコード作成 + config の S3 sync + KV 投入を一括反映
+#    CLOUDFLARE_DNS_API_TOKEN=xxx node scripts/register-game.mjs <game_id>
+
+# 7. 動作確認できたら registry.json の enabled を true にして再度 register-game.mjs
 
 # 8. Discord で /list に出現することを確認
 
@@ -46,6 +47,7 @@ cp -r games/_template games/terraria
 |---|---|---|---|
 | `instance_types` | string[] | `["m7a.xlarge", "m6a.xlarge"]` | EC2 Fleet 候補。先頭優先。AZ 横断で中断率を下げる |
 | `ebs_size_gb` | number | `30` | データ用 EBS サイズ |
+| `seed_snapshot_id` | string\|null | `null` | 初回起動の種 snapshot。新規ゲームは `null`(空 EBS を `mkfs` して起動)。以降は `/stop` が作る snapshot が自動で使われる |
 | `spot_max_price_jpy_per_hour` | number\|null | `30` | spot 上限。null なら on-demand 価格まで許容 |
 
 ### ネットワーク
@@ -61,6 +63,7 @@ cp -r games/_template games/terraria
 | フィールド | 型 | 例 | 説明 |
 |---|---|---|---|
 | `container_image` | string | `"itzg/minecraft-server:java25"` | Docker イメージ。AMI に pull 済みでなくても可 |
+| `image_source` | enum | `"pull"` | `"pull"`=`container_image` を `docker pull`(公開イメージで完結)/ `"build"`=`launcher/images/<id>/` を S3 経由で取得し EC2 で `docker build`(自前イメージ) |
 | `env` | object | `{EULA: "TRUE", ...}` | コンテナの環境変数。`itzg/minecraft-server` の場合は公式 doc 参照 |
 | `config_s3_prefix` | string | `"s3://gs-game-configs/atm11/"` | サーバー起動時に S3 から sync するゲーム設定 |
 
@@ -128,7 +131,7 @@ cp -r games/_template games/terraria
 
 ### ❌ cf_record_id が "TBD_AFTER_REGISTRATION" のまま
 
-→ DNS 更新が無効になり、起動しても接続できない。`scripts/register-game.sh` 実行後に必ず実値が入っているか確認。
+→ DNS 更新が無効になり、起動しても接続できない。`scripts/register-game.mjs` 実行後に必ず実値が入っているか確認。
 
 ## 参考: 既存ゲーム
 

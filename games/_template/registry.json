@@ -8,6 +8,7 @@
     "t4g.medium"
   ],
   "ebs_size_gb": 10,
+  "seed_snapshot_id": null,
   "spot_max_price_jpy_per_hour": 10,
 
   "subdomain": "REPLACE_ME_subdomain",
@@ -17,6 +18,7 @@
   ],
 
   "container_image": "itzg/minecraft-server:java21",
+  "image_source": "pull",
   "env": {
     "EULA": "TRUE",
     "TYPE": "VANILLA",
