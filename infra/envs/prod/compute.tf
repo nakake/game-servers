@@ -28,11 +28,11 @@ resource "aws_launch_template" "game_server" {
   name        = "gs-game-server"
   description = "Game server base LT. user-data / snapshot / EBS size / instance type are overridden per launch by the Worker."
 
-  # AMI は SSM public parameter の resolve: 形式を LT に直書きする。EC2 が起動毎に
-  # 最新 AL2023 を解決するため、現状の Worker (EC2_IMAGE_ID = resolve:ssm:...) と
-  # 挙動が一致する。apply 時点の ami-id に固定する data 参照ではなく「起動毎 latest」
-  # を維持する選択 (docs/iac-migration-plan.md Step 5)。
-  image_id = "resolve:ssm:/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64"
+  # AMI は SSM Parameter `/gs/ami/game-server-latest` を resolve: 形式で間接参照する
+  # (Phase 3 Step 7 で AL2023 公式 SSM から自前 SSM へ切替)。EC2 が起動毎に SSM を解決
+  # するため、Packer build 後に `aws ssm put-parameter --overwrite` で AMI ID を書き換える
+  # だけで次の /start から反映される (terraform apply 不要)。SSM Parameter 自体は ami.tf。
+  image_id = "resolve:ssm:${aws_ssm_parameter.game_server_ami_id.name}"
 
   key_name = data.aws_key_pair.gs_phase0.key_name
 

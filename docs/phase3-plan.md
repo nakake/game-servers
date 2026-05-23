@@ -214,14 +214,34 @@ Worker / sidecar コード変更: なし。
 
 Worker コード変更: **あり**。デプロイは Step 8。`WORKER_PUBLIC_URL` の本番 URL 書き換え + sidecar HMAC secret 投入 (Step 5) はユーザー実行 (runbook-phase3-sidecar.md §Step 1〜3 参照)。
 
-### Step 7: AMI 再ビルド (sidecar イメージ焼き込み)  *(未着手)*
+### Step 7: AMI 再ビルド (sidecar イメージ焼き込み)  *(完了 2026-05-23 — Packer 定義 + IaC、実行はユーザー)*
 
-- [ ] `ami/` の Packer 定義に sidecar イメージのビルド + `docker save` → AMI 内 `/var/lib/sidecar-image.tar` 配置を追加。cloud-init で `docker load -i /var/lib/sidecar-image.tar` してから `docker run` する流れ
-- [ ] `packer build` で新 AMI 発行 → AMI ID を Terraform 変数 (or SSM Parameter) で参照させて Launch Template を更新 (`infra/modules/launch-template/` の `image_id` 経路)
-- [ ] terraform plan で Launch Template の新 `image_id` 差分を確認 → apply
-- [ ] 新 AMI で空 EC2 を起動して `docker images` / `docker run gs-sidecar --version` の動作だけ単体確認 (Worker 連携は Step 8)
+> **設計変更 (2026-05-23 議論)**: Phase 3 着手前は Packer 未導入 (元々 Phase 4 で予定) だった
+> ことが判明。ユーザー判断で **本 Step で Packer 導入を前倒し**することにした (S3 経由配布
+> や GHCR pull に切り替える案も検討したが、決定2 の AMI 焼き込み路線を維持)。
 
-Infra 変更: **あり** (新 AMI + Launch Template 更新)。`apply` は分類器のためユーザー実行 (memory: terraform-aws-credential-bridge)。
+- [x] **Packer 定義 (`ami/`) 新規作成**:
+  - `ami/game-server.pkr.hcl` (AL2023 base + amazon-ebs builder、`var.sidecar_tar_path` で
+    ローカル `docker save` 出力を受け取る、AMI 名は `gs-game-server-<version>-<timestamp>`)
+  - `ami/scripts/install-docker.sh` (`dnf install -y docker` + Compose v2 binary を GitHub
+    releases から配置 / memory `al2023-docker-compose` の路線)
+  - `ami/scripts/install-sidecar.sh` (`/tmp/sidecar-image.tar` → `/var/lib/sidecar-image.tar`、
+    `docker load` は AMI build 中ではなく cloud-init 起動時に実行 = AMI サイズ抑制)
+  - `ami/README.md` / `ami/.gitignore`
+- [x] **Orchestrator スクリプト `scripts/build-sidecar-ami.ps1`**: npm build → docker build
+  `--platform linux/amd64` → docker save → packer init + build を 1 コマンドで実行
+- [x] **AMI ID 参照経路の刷新**: `infra/envs/prod/ami.tf` 新規作成、`aws_ssm_parameter
+  "game_server_ami_id"` (name `/gs/ami/game-server-latest`、初期値は AL2023 公式 SSM の値、
+  `lifecycle.ignore_changes = [value]` で Packer の上書きを許容)。`infra/envs/prod/compute.tf`
+  の Launch Template `image_id` を `resolve:ssm:${aws_ssm_parameter.game_server_ami_id.name}`
+  に変更。AMI 更新 = SSM `put-parameter --overwrite` だけ、**terraform apply 不要**
+- [x] `terraform fmt -check` / `terraform validate` 通過 (apply はユーザー実行)
+- [x] **runbook 整備**: `docs/runbook-phase3-sidecar.md` に Step 5 (AMI build) を追加。
+  Packer 用 IAM の方針、terraform apply の差分目視ポイント、build orchestrator 実行、
+  SSM put-parameter による新 AMI ID 反映、任意 smoke check を記載
+- [ ] **ユーザー実行**: ① `terraform apply` で SSM Parameter 作成 + LT image_id 切替、② `scripts/build-sidecar-ami.ps1` で AMI build、③ `aws ssm put-parameter --overwrite` で SSM に新 AMI ID を反映、④ (任意) 新 AMI で 1 台空 EC2 を立てて smoke check
+
+Infra 変更: **あり** (新 SSM Parameter + Launch Template image_id 切替)。`apply` は分類器のためユーザー実行 (memory: terraform-aws-credential-bridge)。
 
 ### Step 8: デプロイ + ATM11 実機確認  *(未着手)*
 

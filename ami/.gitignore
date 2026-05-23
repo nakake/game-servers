@@ -1,0 +1,5 @@
+# Packer cache and intermediate build artifacts
+packer_cache/
+manifest.json
+output-*/
+*.box
