@@ -41,6 +41,8 @@ out/
 .turbo/
 .cache/
 *.tsbuildinfo
+# Phase 3 Step 7: scripts/build-sidecar-ami.ps1 の中間生成物 (sidecar-image.tar) 置き場
+.build/
 
 # ============================================================
 # TypeScript / JS

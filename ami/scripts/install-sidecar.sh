@@ -26,9 +26,13 @@ chmod 644 "${DST}"
 file "${DST}"
 ls -la "${DST}"
 # `docker load` の dry-run は無いので、tar が `docker save` 由来である簡易確認だけ:
-tar -tf "${DST}" | head -5 || {
+# head -5 でパイプを途中で閉じると tar が SIGPIPE で落ち、pipefail と組み合わさって誤検知
+# するため、validation と preview を分離する。
+if ! tar -tf "${DST}" >/dev/null 2>&1; then
   echo "[install-sidecar] ERROR: ${DST} is not a valid tar archive" >&2
   exit 1
-}
+fi
+# 先頭数件を best-effort で出す (head による SIGPIPE は無視)。
+tar -tf "${DST}" 2>/dev/null | head -5 || true
 
 echo "[install-sidecar] complete (${DST} placed)"

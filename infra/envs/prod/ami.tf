@@ -19,6 +19,7 @@ data "aws_ssm_parameter" "al2023_latest" {
 resource "aws_ssm_parameter" "game_server_ami_id" {
   name        = "/gs/ami/game-server-latest"
   type        = "String"
+  data_type   = "aws:ec2:image" # Launch Template が `resolve:ssm:` で参照するには必須。
   description = "Latest gs-game-server AMI ID. Updated by scripts/build-sidecar-ami.ps1 after Packer build (Phase 3 Step 7)."
 
   # 初期値は AL2023 公式 AMI ID (Packer build 前の fallback)。`data.aws_ssm_parameter` は

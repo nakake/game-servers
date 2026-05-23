@@ -64,6 +64,19 @@ $tarSize = [math]::Round((Get-Item $TarPath).Length / 1MB, 1)
 Write-Host "    tar size: $tarSize MB"
 
 # 4. packer
+# AWS 認証ブリッジ: Packer の AWS SDK は env からしか認証情報を読まない。CLI の login
+# セッションを env に展開する (infra/tf.ps1 と同じ流儀)。
+Write-Step "Bridging AWS credentials from CLI session to env"
+Remove-Item Env:AWS_ACCESS_KEY_ID, Env:AWS_SECRET_ACCESS_KEY, Env:AWS_SESSION_TOKEN -ErrorAction SilentlyContinue
+try { aws sts get-caller-identity *> $null } catch { }
+if ($LASTEXITCODE -ne 0) {
+  throw "AWS CLI のセッションが無効です。`aws sso login` 等で再認証してから再実行してください。"
+}
+$cred = aws configure export-credentials --format process | ConvertFrom-Json
+$env:AWS_ACCESS_KEY_ID     = $cred.AccessKeyId
+$env:AWS_SECRET_ACCESS_KEY = $cred.SecretAccessKey
+if ($cred.SessionToken) { $env:AWS_SESSION_TOKEN = $cred.SessionToken }
+
 Write-Step "packer init"
 Push-Location $AmiDir
 try {
@@ -79,6 +92,8 @@ try {
   if ($LASTEXITCODE -ne 0) { throw "packer build failed (exit $LASTEXITCODE)" }
 } finally {
   Pop-Location
+  # 終了時に env から認証情報を消す (やがて失効するトークンを呼び出し元シェルに残さない)。
+  Remove-Item Env:AWS_ACCESS_KEY_ID, Env:AWS_SECRET_ACCESS_KEY, Env:AWS_SESSION_TOKEN -ErrorAction SilentlyContinue
 }
 
 Write-Host ""

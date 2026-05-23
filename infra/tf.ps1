@@ -48,7 +48,7 @@ if (-not $tf) { throw "terraform.exe not found (PATH / winget パッケージ配
 # やがて失効する認証情報を残さない)。
 $prodDir = Join-Path $PSScriptRoot 'envs\prod'
 try {
-  & $tf -chdir="$prodDir" @args
+  & $tf "-chdir=$prodDir" @args
   $code = $LASTEXITCODE
 } finally {
   Remove-Item Env:AWS_ACCESS_KEY_ID, Env:AWS_SECRET_ACCESS_KEY, Env:AWS_SESSION_TOKEN -ErrorAction SilentlyContinue
