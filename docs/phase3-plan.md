@@ -165,21 +165,21 @@ Worker コード変更: **あり**。デプロイは Step 8。`expectedInstanceI
 
 Worker コード変更: **あり**。
 
-### Step 4: sidecar コンテナ実装 (TS + minecraft_rcon adapter)  *(未着手)*
+### Step 4: sidecar コンテナ実装 (TS + minecraft_rcon adapter)  *(完了 2026-05-23)*
 
-- [ ] `launcher/sidecar/` 新規ディレクトリ
-- [ ] `package.json` (Node 22、deps: `rcon-client`, 標準 `crypto`/`fetch`、TS dev deps)
-- [ ] `src/main.ts`: メイン loop
-  - EC2 IMDSv2 で `game_id` (tag `Game`) と `instance_id` を取得
-  - SSM から `/gs/<game_id>/sidecar_hmac_secret` と registry の `idle_check.config.password_source` を取得
-  - registry を Worker に GET (sidecar は KV を持たない、Worker から JSON 取得) → idle_check 仕様を取得
-  - `heartbeat_interval_sec` 毎に adapter.check() → Worker に heartbeat POST
-  - 連続して `timeout_min` 分プレイヤー 0 → `/sidecar/idle-detected` POST
-- [ ] `src/adapters/minecraft-rcon.ts`: `rcon-client` で `list` 実行 → `empty_pattern` 正規表現マッチで idle 判定。返り値 `{ player_count, idle: boolean }`
-- [ ] `src/adapters/index.ts`: `idle_check.type` で adapter を分岐 (Phase 3 では `minecraft_rcon` のみ実装、他は `throw new Error('not implemented')` で Phase 6 / 将来へ)
-- [ ] `src/hmac.ts`: Worker と同じ HMAC payload 形式 (`${timestamp}\n${body}`) で署名生成 (Worker と仕様を厳密に揃える)
-- [ ] `Dockerfile`: multi-stage build (Node 22 alpine、`tsc` → 配布)。RCON 接続用の最小 image
-- [ ] ローカルテスト: `docker compose up` でゲーム本体 + sidecar を起動し、プレイヤー 0 状態で heartbeat が Worker dev (`wrangler dev`) に届くことを確認
+- [x] `launcher/sidecar/` を **pnpm workspace 外**の独立 npm パッケージとして新設 (`pnpm-workspace.yaml` から `launcher/sidecar` 行を削除。Docker image を単独で組みやすくする設計判断)。`package.json` / `tsconfig.json` / `Dockerfile` (multi-stage build, `node:22-alpine`) / `.dockerignore` / `.gitignore` / `README.md` を整備
+- [x] `src/main.ts`: 起動シーケンス (env → IMDSv2 → SSM → registry → adapter → loop)。SIGTERM/SIGINT で graceful exit
+- [x] `src/loop.ts`: tick の判定ロジックを `evaluateTick(state, input)` の **純粋関数** に切り出し、テスト可能化 (adapter 失敗時の保守的更新 / cooldown による二重発火抑制まで含む)
+- [x] `src/imds.ts`: IMDSv2 (PUT トークン → GET metadata)。token は TTL 内キャッシュ、リクエストは 2 秒 timeout
+- [x] `src/ssm.ts`: `@aws-sdk/client-ssm` で SecureString 取得 (EC2 instance role からの credential provider chain)
+- [x] `src/registry.ts`: Worker `/sidecar/registry?game_id=<id>` を HMAC GET、`SidecarGameDefinition` (必要フィールドのみ) を返す
+- [x] `src/heartbeat.ts` / `src/idle-notify.ts`: HMAC POST、ステータスコードで成功判定 (204 / 202)
+- [x] `src/adapters/minecraft-rcon.ts`: `rcon-client` で `list` 実行、`empty_pattern` マッチで idle 判定、`There are N` 正規表現で player_count をパース。`parsePlayerCount` / `isIdleResponse` を純粋関数として export しテスト可能化
+- [x] `src/adapters/index.ts`: `idle_check.type` 分岐 (`minecraft_rcon` のみ実装、`tshock_rest` / `steam_query` / `factorio_rcon` は明示 `throw` で Phase 6 持ち越し)
+- [x] `src/hmac.ts`: Worker (`workers/discord-handler/src/lib/auth/hmac.ts`) と同仕様 (`formatPostPayload` / `formatGetPayload` / `signHmac`)。Node 22 LTS の `node:crypto` `webcrypto.subtle` を使用
+- [x] テスト: `hmac.test.ts` (6 ケース: 決定論性 / formatPost/Get 仕様 / secret 変更で signature 変動)、`loop.test.ts` (6 ケース: adapter 失敗時の保守更新 / 非 idle 更新 / timeout 内 quiet / timeout 超過 notify / cooldown / re-notify)、`adapters/minecraft-rcon.test.ts` (4 ケース: パース)
+- [x] `npm ci` / `npm run typecheck` / `npm test` (16/16 pass) / `npm run build` 通過。`dist/` 生成済。
+- [ ] ローカル `docker compose` 統合テスト → **Step 6 に持ち越し** (本 Step 4 単体では Docker image build と単体テストまで)
 
 sidecar 側変更のみ。Worker / AMI 未変更。
 

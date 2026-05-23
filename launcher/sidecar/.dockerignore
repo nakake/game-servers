@@ -1,0 +1,8 @@
+node_modules
+dist
+.git
+.gitignore
+*.test.ts
+**/*.test.ts
+README.md
+.dockerignore

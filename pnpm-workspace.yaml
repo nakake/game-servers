@@ -1,4 +1,6 @@
 packages:
   - "workers/*"
   - "workers/shared/*"
-  - "launcher/sidecar"
+# launcher/sidecar は workspace 外の独立 npm パッケージ (Phase 3、AMI 焼き込み用の Docker image)。
+# 単独 image をシンプルに作るため pnpm workspace lockfile に依存させない設計。
+# 開発時は launcher/sidecar/ 内で `npm ci` / `npm run typecheck` / `npm test` を直接走らせる。
