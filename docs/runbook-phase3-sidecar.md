@@ -277,7 +277,9 @@ Discord で `/start atm11` 実行。期待される流れ:
 KV を直接覗いて sidecar の last_seen を確認:
 
 ```powershell
-pnpm wrangler kv key get 'last-seen:atm11' --binding SERVER_STATE --remote
+pnpm wrangler kv key get 'last-seen:atm11' --binding SERVER_STATE
+# 注: wrangler kv key get/put は本番 KV がデフォルト。`--remote` フラグは存在しない (3.x で
+# 確認、`Unknown argument: remote` で落ちる)。ローカルを指定する時だけ `--local` を付ける。
 # → {"gameId":"atm11","instanceId":"i-...","lastSeenAt":"2026-05-23T...","playerCount":-1 or 0}
 ```
 
