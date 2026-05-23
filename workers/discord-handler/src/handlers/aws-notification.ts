@@ -14,6 +14,7 @@
 // 参照: https://docs.aws.amazon.com/sns/latest/dg/sns-http-https-endpoint-as-subscriber.html
 
 import { DiscordFollowUpClient } from '../lib/discord/follow-up.js';
+import { postDiscordWebhookMessage } from '../lib/discord/webhook.js';
 import { getGame } from '../lib/registry/store.js';
 import {
   isNotification,
@@ -96,6 +97,8 @@ async function handleNotification(
   }
 
   // --- 汎用 AWS アラート: channel webhook に embed 投稿 ---
+  // env 未設定は本 Worker の運用設定不備なので 500 で返し、それ以外の Discord 側の
+  // 一過性エラーは 502 で返して SNS に再送させる (現行挙動の踏襲)。
   if (env.DISCORD_WEBHOOK_URL === undefined || env.DISCORD_WEBHOOK_URL === '') {
     console.error('DISCORD_WEBHOOK_URL not configured; dropping SNS notification');
     return new Response('DISCORD_WEBHOOK_URL not configured\n', { status: 500 });
@@ -104,15 +107,9 @@ async function handleNotification(
   const severity = inferSeverity(msg);
   const embed = buildDiscordEmbed(msg, severity);
 
-  const response = await fetch(env.DISCORD_WEBHOOK_URL, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ embeds: [embed] }),
-  });
-  if (!response.ok) {
-    const body = await response.text();
-    console.error(`Discord webhook POST failed (${response.status}):`, body);
-    return new Response(`Discord webhook failed: HTTP ${response.status}\n`, { status: 502 });
+  const ok = await postDiscordWebhookMessage(env, { embeds: [embed] });
+  if (!ok) {
+    return new Response('Discord webhook failed\n', { status: 502 });
   }
   return new Response('notification delivered\n');
 }
@@ -151,7 +148,7 @@ async function deliverGameReady(gameId: string, env: Env): Promise<void> {
 
   // KV に文脈が無い (TTL 切れ / 同 game の /start を打っていない) → mention 無しで webhook のみ。
   if (pending === undefined) {
-    await postWebhookMessage(env, announcement, undefined);
+    await postDiscordWebhookMessage(env, { content: announcement });
     return;
   }
 
@@ -182,37 +179,14 @@ async function deliverGameReady(gameId: string, env: Env): Promise<void> {
 
   // follow-up POST が失敗 (token 失効など) → channel webhook で新規メッセージ。
   if (!delivered) {
-    await postWebhookMessage(env, `${mention}${announcement}`, pending.userId);
+    await postDiscordWebhookMessage(env, {
+      content: `${mention}${announcement}`,
+      ...(pending.userId !== undefined ? { mentionUserIds: [pending.userId] } : {}),
+    });
   }
 
   // 配信できたら KV を消す (SNS 再送による二重通知を防ぐ)。
   await deletePendingReady(env.SERVER_STATE, gameId).catch(() => undefined);
-}
-
-// channel webhook へ plain メッセージを投稿する。
-// mention を ping させるため embed ではなく content + allowed_mentions を使う。
-async function postWebhookMessage(
-  env: Env,
-  content: string,
-  mentionUserId: string | undefined,
-): Promise<void> {
-  if (env.DISCORD_WEBHOOK_URL === undefined || env.DISCORD_WEBHOOK_URL === '') {
-    console.error('DISCORD_WEBHOOK_URL not configured; cannot deliver game-ready notification');
-    return;
-  }
-  const allowedMentions: Record<string, unknown> = { parse: [] };
-  if (mentionUserId !== undefined) {
-    allowedMentions.users = [mentionUserId];
-  }
-  const response = await fetch(env.DISCORD_WEBHOOK_URL, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ content, allowed_mentions: allowedMentions }),
-  });
-  if (!response.ok) {
-    const body = await response.text();
-    console.error(`game-ready webhook POST failed (${response.status}):`, body);
-  }
 }
 
 function inferSeverity(msg: SnsNotification): Severity {

@@ -1,6 +1,6 @@
 # Phase 4 実装計画 — 通知拡張 (idle 停止 / Spot 中断 / snapshot 失敗)
 
-最終更新: 2026-05-23 (新規)
+最終更新: 2026-05-24 (Step 1 完了 — webhook ヘルパー独立化、aws-notification 移植、テスト全通過)
 
 ## このドキュメントについて
 
@@ -62,18 +62,23 @@ Phase 4 で **やらない** (持ち越し):
 
 ## 実装ステップ
 
-### Step 1: Discord webhook ヘルパーを独立化  *(未着手)*
+### Step 1: Discord webhook ヘルパーを独立化  *(完了 2026-05-24)*
 
 `postWebhookMessage` を `aws-notification.ts` の private 関数から `lib/discord/webhook.ts` の
 公開 API に格上げ。
 
-- [ ] `workers/discord-handler/src/lib/discord/webhook.ts` 新規:
-  - `postDiscordWebhookMessage(env, {content?, embeds?, mentionUserIds?})` を提供
+- [x] `workers/discord-handler/src/lib/discord/webhook.ts` 新規:
+  - `postDiscordWebhookMessage(env, {content?, embeds?, mentionUserIds?})` を提供 (戻り値 `Promise<boolean>`、呼び出し側で SNS 502 再送判断が可能)
   - `env.DISCORD_WEBHOOK_URL` 未設定なら `console.warn` + 早期 return (Phase 1 の挙動踏襲)
-  - response 失敗は warn ログのみ (通知失敗で Worker 全体は止めない)
-- [ ] `aws-notification.ts` を新ヘルパー利用に書き換え (`postWebhookMessage` 削除、同等の embed payload を組んで呼ぶ)
-- [ ] `lib/discord/webhook.test.ts`: mock `fetch` で payload を assert (content + embed 構造 + allowed_mentions)。失敗時の挙動 (env 未設定 / fetch 失敗) もカバー
-- [ ] `pnpm typecheck` / `pnpm test` 通過
+  - response 失敗 / fetch throw は warn ログのみ、throw しない (通知失敗で Worker 全体は止めない)
+  - `allowed_mentions.parse = []` を常時付与 (@everyone / role の暴発防止)
+- [x] `aws-notification.ts` を新ヘルパー利用に書き換え:
+  - 汎用 AWS アラート (embed POST) を `postDiscordWebhookMessage({embeds:[embed]})` 経由に
+  - `deliverGameReady` の game-ready 通知 (content + mention) も新ヘルパー経由に
+  - private `postWebhookMessage` を削除
+  - 502 / 500 の status code 差別化は呼び出し側 (handleNotification) に残した (SNS 再送 vs 設定不備)
+- [x] `lib/discord/webhook.test.ts`: 11 ケース (env undefined/empty、content only、embeds only、mentionUserIds、空配列の扱い、non-2xx、fetch throw、POST/JSON header)
+- [x] `pnpm typecheck` / `pnpm test` (54 全通過) / `pnpm build` (227.65 KiB)
 
 Worker コード変更: **あり (リファクタ + 新規 helper)**。挙動変化なし (既存 aws-notification の経路は同じ payload)。
 
