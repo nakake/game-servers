@@ -1,5 +1,5 @@
 // Minecraft RCON で `list` コマンドを実行 → `empty_pattern` でマッチした行を idle とみなす。
-// registry.idle_check.config の例 (games/atm11/registry.json):
+// registry.idle_check.config の例 (games/<game>/registry.json、minecraft 系の game 共通):
 //   { host: "localhost", port: 25575, command: "list", empty_pattern: "There are 0 of a max" }
 
 import { Rcon } from 'rcon-client';

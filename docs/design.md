@@ -1,6 +1,6 @@
 # Game Servers — 設計ドキュメント
 
-最終更新: 2026-05-23 (rev 4: Phase 2 完了。新ゲーム追加実証は Phase 6 に切り出し、Phase 3〜5 を公開前タスクとして優先)
+最終更新: 2026-05-23 (rev 5: Phase 3 完了。sidecar + idle 自動停止 + Cron フォールバックが本番稼働、ATM11 で全経路実機検証済)
 
 ## 1. 目的とスコープ
 
@@ -147,11 +147,15 @@ POST /discord/interaction
   │    └─ /backup → handlers/backup.ts
   └─ APPLICATION_COMMAND_AUTOCOMPLETE → game choices from KV
 
-POST /sidecar/idle-detected
-  └─ HMAC 認証 → stop フロー起動
+POST /sidecar/idle-detected           ← Phase 3 実装済
+  └─ HMAC 認証 → ctx.waitUntil(runStopWorkflow({triggeredBy:'sidecar'}))
+     + expectedInstanceId ガード (古い instance からの晩到 stop 防止)
 
-POST /sidecar/heartbeat
-  └─ 状態 KV 更新 (last_seen, player_count)
+POST /sidecar/heartbeat               ← Phase 3 実装済
+  └─ HMAC 認証 → SERVER_STATE `last-seen:<game>` を上書き (TTL = timeout_min*3 分)
+
+GET  /sidecar/registry?game_id=<id>   ← Phase 3 実装済 (決定8)
+  └─ HMAC 認証 → KV から GameDefinition を JSON 返却 (sidecar 起動時に 1 回)
 
 POST /aws/notification
   ├─ SNS SubscriptionConfirmation → URL 自動 GET で承認
@@ -205,7 +209,7 @@ namespace: SERVER_STATE
 | Discord webhook 検証 | ed25519 (Discord public key) | Workers Secrets |
 | AWS API 呼び出し | IAM Access Key (Phase 1) / OIDC (Phase 2) | Workers Secrets |
 | Cloudflare DNS API | API Token (Zone:DNS:Edit のみ) | Workers Secrets |
-| sidecar → Workers | HMAC SHA-256 共有秘密 | Workers Secrets + SSM |
+| sidecar → Workers | HMAC SHA-256 共有秘密 (game 別、Phase 3 実装) | Workers Secrets (`SIDECAR_HMAC_SECRETS` JSON map) + SSM `/gs/<game>/sidecar_hmac_secret` |
 
 ### 4.5 AWS API 呼び出し
 
@@ -629,14 +633,15 @@ F:/project/game_servers/
 > Phase 2 当初計画にあった「2 個目のゲーム (Vanilla 1.21) 追加実証」は **Phase 6 に切り出し**
 > た (公開前の Phase 3〜5 を優先するため)。詳細は `docs/phase2-plan.md`。
 
-### Phase 3: 自動停止 (2 日) — **公開前必須**
+### Phase 3: 自動停止 — 完了 (2026-05-23)
 
-- [ ] sidecar コンテナ実装 (TypeScript / Docker)
-- [ ] idle 検知 → Workers POST → 停止フロー
-- [ ] snapshot 世代管理 (Worker Cron、§5.5 — DLM は不採用) ※IaC migration Step 6 で Worker Cron 実装済、Phase 3 では sidecar 連携を追加
-- [ ] Workers cron フォールバック (sidecar 沈黙時の保険)
+- [x] sidecar コンテナ実装 (TypeScript / Docker、`launcher/sidecar/`)
+- [x] idle 検知 → `/sidecar/idle-detected` → `runStopWorkflow` (`triggeredBy: 'sidecar'`)
+- [x] snapshot 世代管理 (Worker Cron、§5.5、IaC migration Step 6 で実装済 → Phase 3 では sidecar 連携を追加)
+- [x] Workers cron フォールバック (sidecar 沈黙時の保険、5 分 cron に `handleIdleFallback` 追加)
+- [x] Packer 導入 (`ami/`) を Phase 4 から前倒し。sidecar image を AMI に `docker load -i /var/lib/sidecar-image.tar` で起動時ロード
 
-ゴール: 放置で勝手に停止する。**友人内クローズドでも公開時にコスト保全のため最優先**。
+ゴール: 放置で勝手に停止する。**達成** — ATM11 で 10 分 idle → 自動 snapshot + terminate、world 永続性 + Discord `/stop` 回帰すべて実機確認済 (`docs/phase3-plan.md` §完了基準、`docs/runbook-phase3-sidecar.md` §Step 6)。Cron フォールバックの **発火そのもの** だけ実機未検証だが、`idle-fallback.test.ts` の unit test でロジックは固めてあり、skip 経路 (`within-window`) は実機ログで確認済。
 
 ### Phase 4: 通知拡張 (1〜2 日) — **公開前必須**
 

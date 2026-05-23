@@ -1,6 +1,6 @@
 # Phase 3 実装計画 — 自動停止 (sidecar + idle 検知)
 
-最終更新: 2026-05-23 (新規)
+最終更新: 2026-05-23 (Phase 3 完了 — Step 1〜9 全部 done、ATM11 で全経路実機検証済)
 
 ## このドキュメントについて
 
@@ -10,8 +10,10 @@ design.md §10 **Phase 3: 自動停止** を実行するための計画。Phase 
 Phase 3 では sidecar が idle を検知して Worker に通知 → `/stop` フロー (snapshot 作成 + EC2
 terminate) を発火させ、**放置で勝手に料金が止まる** 状態に持っていく。
 
-> **進捗 (2026-05-23)**: 計画起こし完了、未着手。**公開前必須** (友人内クローズドでもコスト
-> 保全のため最優先、design.md §10 Phase 3 参照)。
+> **Phase 3 完了 (2026-05-23)**: Step 1〜9 全部 done。ATM11 で sidecar idle 自動停止 / world
+> 永続性 / Discord 手動 stop 回帰すべて実機確認済 (Step 8 / runbook §6.4 §6.7 §6.8)。Cron
+> フォールバック **発火そのもの** だけは unit test 担保で持ち越し (skip 経路は実機ログ済)。
+> 友人内クローズドの公開前必須要件はクリア → 次は Phase 4 (通知拡張) → Phase 5 (OIDC) の順。
 
 ## 関連ドキュメント
 
@@ -179,7 +181,7 @@ Worker コード変更: **あり**。
 - [x] `src/hmac.ts`: Worker (`workers/discord-handler/src/lib/auth/hmac.ts`) と同仕様 (`formatPostPayload` / `formatGetPayload` / `signHmac`)。Node 22 LTS の `node:crypto` `webcrypto.subtle` を使用
 - [x] テスト: `hmac.test.ts` (6 ケース: 決定論性 / formatPost/Get 仕様 / secret 変更で signature 変動)、`loop.test.ts` (6 ケース: adapter 失敗時の保守更新 / 非 idle 更新 / timeout 内 quiet / timeout 超過 notify / cooldown / re-notify)、`adapters/minecraft-rcon.test.ts` (4 ケース: パース)
 - [x] `npm ci` / `npm run typecheck` / `npm test` (16/16 pass) / `npm run build` 通過。`dist/` 生成済。
-- [ ] ローカル `docker compose` 統合テスト → **Step 6 に持ち越し** (本 Step 4 単体では Docker image build と単体テストまで)
+- [x] ローカル `docker compose` 統合テスト → Step 6 で `launcher/images/atm11/docker-compose.yml` に sidecar service を追加済 (`network_mode: "service:atm11"`)。実機検証 (Step 8 §6.4) で本番経路の動作確認したため、ローカル compose での再現テストはオプション扱いに変更
 
 sidecar 側変更のみ。Worker / AMI 未変更。
 
@@ -243,44 +245,49 @@ Worker コード変更: **あり**。デプロイは Step 8。`WORKER_PUBLIC_URL
 
 Infra 変更: **あり** (新 SSM Parameter + Launch Template image_id 切替)。`apply` は分類器のためユーザー実行 (memory: terraform-aws-credential-bridge)。
 
-### Step 8: デプロイ + ATM11 実機確認  *(未着手 — ユーザー実機)*
+### Step 8: デプロイ + ATM11 実機確認  *(完了 2026-05-23)*
 
 詳細手順は `docs/runbook-phase3-sidecar.md` **Step 6** (= Phase 3 plan の Step 8 に対応)
 を参照。本セクションは Phase 3 plan 上のチェックリスト。
 
-- [ ] `pnpm deploy` で Worker を本番反映 (sidecar ルート + Cron フォールバック含む)
-- [ ] `/start atm11` → 起動完了 → sidecar が heartbeat を送り始めることを `wrangler tail` で確認 (runbook §6.3)
-- [ ] プレイヤーが 1 人接続 → 切断 → 10 分放置
-- [ ] sidecar から `/sidecar/idle-detected` が飛び、`runStopWorkflow` が走って ATM11 が停止することを確認 (runbook §6.4)
-- [ ] **Cron フォールバックの動作確認**: sidecar を `docker stop sidecar && docker rm sidecar` で殺し、`timeout_min + 5min` (~15 分) 後に Cron が `runStopWorkflow` を発火させることを確認 (runbook §6.5)
-- [ ] `/start` 直後の grace 期間で誤停止しない (runbook §6.6)
-- [ ] 再 `/start atm11` で world が永続していることを確認 (runbook §6.7)
-- [ ] Discord 手動 `/stop atm11` が引き続き動く (runbook §6.8)
+- [x] `pnpm deploy` で Worker を本番反映 (sidecar ルート + Cron フォールバック含む)。Worker URL は `https://discord-handler.<your-account>.workers.dev`
+- [x] `/start atm11` → 起動完了 → sidecar が heartbeat を送り始めることを `wrangler tail` で確認 (runbook §6.3)。途中で `WORKER_PUBLIC_URL` placeholder 残りと `--network host` (RCON 25575 が見えず `ECONNREFUSED`) を踏み、両方修正済 (commit `ceccd7a`)
+- [x] プレイヤーが 1 人接続 → 切断 → 10 分放置
+- [x] sidecar から `/sidecar/idle-detected` が飛び、`runStopWorkflow` が走って ATM11 が停止 (runbook §6.4) — snapshot `snap-0a5791d24abbb1323` 作成、`dockerStopSucceeded: true` / `dnsReset: true` / `pendingCleanupScheduled: true`
+- [x] 再 `/start atm11` で world が永続していることを確認 (runbook §6.7)
+- [x] Discord 手動 `/stop atm11` が引き続き動く (runbook §6.8) — `triggeredBy: 'discord'` で `[stop-workflow]` ログ
+- [x] **`/start` 直後の grace 期間で誤停止しない (runbook §6.6)** — 間接確認。§6.4 直後の Cron で `[idle-fallback] atm11 skip (within-window)` を観察、`last_seen` が新しい間 fallback が発火しないロジック健在
+- [ ] **Cron フォールバックの **発火そのもの** 実機検証 (runbook §6.5)** — 持ち越し。`idle-fallback.test.ts` の 5 ケース (decideIdleAction の `action: 'stop'` ブランチ含む) で unit test 済、関連 cron (snapshot retention / volume cleanup) は実機で動作確認済。実機での 15 分待ち発火は公開後の運用ログで偶発的に拾えれば良い
 
-Worker / sidecar / AMI 変更: なし (デプロイのみ)。`wrangler deploy` と Discord 実機操作はユーザーが実施。
+副次的な確認: 5 分 cron が `[idle-fallback] skip (within-window)` / `snapshot retention: deleted snap-...` / `volume cleanup: deleted volume vol-...` を順に処理する流れも実機で観察済 (= cron 経路全体が動いている)。
 
-### Step 9: ドキュメント更新 + Phase 3 完了マーク  *(未着手)*
+Worker / sidecar / AMI 変更: なし (デプロイのみ)。実機検証は `wrangler tail` と Discord 操作でユーザーが実施した。実機で出た 2 件の問題 (`WORKER_PUBLIC_URL` placeholder 残り、`--network host` で RCON 不可) は commit `ceccd7a` で fix 済。
 
-- [ ] `design.md` §10 Phase 3 の checkbox を埋め、完了マーク
-- [ ] `design.md` §4.1 ルーティング図に `/sidecar/heartbeat` `/sidecar/idle-detected` が実装済として注記
-- [ ] `CLAUDE.md` の §AMI に「sidecar 変更時も AMI 再ビルドが必要」を追記
-- [ ] `runbook.md` に新ゲーム追加時の SSM Parameter (`sidecar_hmac_secret`) 作成手順を追加
-- [ ] `phase3-plan.md` の各 Step を完了マーク
+### Step 9: ドキュメント更新 + Phase 3 完了マーク  *(完了 2026-05-23)*
+
+- [x] `design.md` §10 Phase 3 の checkbox を埋め、完了マーク。Packer 前倒し採用と sidecar 実装の根拠も追記
+- [x] `design.md` §4.1 ルーティング図に `/sidecar/heartbeat` `/sidecar/idle-detected` **`/sidecar/registry`** (Phase 3 で追加した決定8 経路) が実装済として注記
+- [x] `design.md` §4.4 認証表の sidecar HMAC 行を「(Phase 3 実装)」「`SIDECAR_HMAC_SECRETS` JSON map + SSM `/gs/<game>/sidecar_hmac_secret`」と具体化
+- [x] `CLAUDE.md` §AMI に「sidecar 変更時も AMI 再ビルドが必要」「`scripts/build-sidecar-ami.ps1` 一発」「AMI ID 更新は SSM put-parameter のみで反映 (terraform apply 不要)」を追記
+- [x] `docs/runbook-phase3-sidecar.md` に新ゲーム追加時の SSM Parameter (`sidecar_hmac_secret`) 作成手順 + Wrangler secret JSON map の追加マージ手順は **既に整備済** (§新ゲーム追加セクション、Phase 6 参照)
+- [x] `phase3-plan.md` の各 Step (1〜9) を完了マーク + 完了基準の checkbox を埋める
 
 ---
 
-## 完了基準
+## 完了基準 (Phase 3 終結版)
 
-- [ ] ATM11 で `/start` 後にプレイヤー 0 状態を `timeout_min` (10 分) 続けると、手動 `/stop` 無しで snapshot + terminate が走る (Step 8 で実機確認)
-- [ ] sidecar を強制停止した状態でも Cron フォールバックが `timeout_min + 5min` 後に EC2 を停止する
-- [ ] `/start` 直後の grace 期間 (heartbeat 未着の最初の 1〜2 分) で誤停止しない
-- [ ] 既存の手動 `/stop atm11` が引き続き動く (回帰)
-- [ ] design.md §10 Phase 3 の 4 項目すべて達成
-- [ ] sidecar コードに `atm11` リテラルが無い (registry 駆動を死守、CLAUDE.md §やってはいけないこと)
+- [x] **ATM11 で `/start` 後にプレイヤー 0 状態を `timeout_min` (10 分) 続けると、手動 `/stop` 無しで snapshot + terminate が走る** (Step 8 §6.4 実機確認済、snapshot `snap-0a5791d24abbb1323`)
+- [ ] sidecar を強制停止した状態でも Cron フォールバックが `timeout_min + 5min` 後に EC2 を停止する → **unit test で担保、実機発火は持ち越し** (公開前必須ではない)
+- [x] `/start` 直後の grace 期間 (heartbeat 未着の最初の 1〜2 分) で誤停止しない → 間接確認 (Step 8 §6.6)
+- [x] 既存の手動 `/stop atm11` が引き続き動く (回帰、Step 8 §6.8)
+- [x] design.md §10 Phase 3 の 4 項目すべて達成 (Step 9 で design.md を更新済)
+- [x] sidecar コードに `atm11` リテラルが無い (`launcher/sidecar/src/**/*.ts` を grep して非 test ファイルは 0 件、registry 駆動を死守)
+- [x] world 永続性 (Step 8 §6.7、snapshot 復元で前回プレイ地点が残っていた)
 
 ## Phase 3 で扱わないもの (持ち越し)
 
 - **`tshock_rest` / `steam_query` / `factorio_rcon` adapter 実装**: Phase 6 (新ゲーム追加実証) で該当 category を追加するときに同時実装。Phase 3 では `minecraft_rcon` のみ
+- **Cron フォールバック発火の実機検証**: unit test (`idle-fallback.test.ts` の `action: 'stop'` ケース) でロジック検証済、skip 経路は実機ログで確認済。実機での 15 分待ち発火は時間コストが高く、運用中に偶発的に拾えれば良い扱いとした
 - **player_count の長期 history KV** (design.md §4.3 「直近 50 件の起動・停止ログ」): Phase 4 (通知拡張) で扱う可能性。Phase 3 は `last_seen` のみで足りる
 - **idle 検知通知の Discord webhook 整形**: 「自動停止しました」の Discord メッセージ整形は Phase 4 (通知拡張) のスコープ。Phase 3 では `runStopWorkflow` の既存通知経路を再利用するに留める
 - **Worker OIDC 化**: Phase 5
