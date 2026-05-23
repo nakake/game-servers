@@ -16,8 +16,14 @@ import {
   describeSnapshotById,
   describeVolumeById,
 } from '../lib/aws/index.js';
-import { deletePendingCleanup, listPendingCleanups } from '../lib/state/pending-cleanup.js';
+import { buildCronFailureNotification } from '../lib/discord/notifications.js';
+import { postDiscordWebhookMessage } from '../lib/discord/webhook.js';
+import { deletePendingCleanup, listPendingCleanups, type PendingCleanup } from '../lib/state/pending-cleanup.js';
+import { shouldNotify } from '../lib/state/notif-suppress.js';
 import type { Env } from '../env.js';
+
+// 同一 volume の失敗は 1 時間 1 回まで通知 (Cron は 5 分間隔)。
+const FAILURE_NOTIFY_TTL_SECONDS = 3600;
 
 export async function handleVolumeCleanup(env: Env): Promise<void> {
   const kv = env.SERVER_STATE;
@@ -46,12 +52,15 @@ export async function handleVolumeCleanup(env: Env): Promise<void> {
       }
 
       // snapshot 失敗。volume は唯一のコピーなので消さない。毎 tick ログが出ないよう entry は
-      // 消し、手動対応に倒す。
+      // 消し、手動対応に倒す。Discord にも通知してユーザーが気づけるようにする。
       if (snap.state === 'error') {
         console.error(
           `volume cleanup: snapshot ${entry.snapshotId} is in "error" state — ` +
             `keeping volume ${entry.volumeId} for manual handling`,
         );
+        await notifyCleanupFailure(env, entry, 'snapshot-error-state',
+          `snapshot ${entry.snapshotId} entered AWS error state`,
+        ).catch((err) => console.error('cleanup notify failed:', err));
         await deletePendingCleanup(kv, entry.volumeId);
         continue;
       }
@@ -79,8 +88,37 @@ export async function handleVolumeCleanup(env: Env): Promise<void> {
         `volume cleanup: deleted volume ${entry.volumeId} (snapshot ${entry.snapshotId} completed)`,
       );
     } catch (err) {
-      // entry は残す → 次 tick で再試行。
+      // entry は残す → 次 tick で再試行。Discord にも通知 (1 時間 1 回まで)。
       console.error(`volume cleanup: failed for volume ${entry.volumeId}:`, err);
+      await notifyCleanupFailure(env, entry, 'aws-error',
+        err instanceof Error ? err.message : String(err),
+      ).catch((notifyErr) => console.error('cleanup notify failed:', notifyErr));
     }
   }
+}
+
+// Discord webhook で volume cleanup の失敗を通知する。1 時間 1 回まで (volume 単位)。
+// volume と snapshot が違うので suppress key は volumeId にする (snapshot が error 状態のときも
+// 同じ key で抑制すれば、aws-error 経路と二重通知を避けられる)。
+async function notifyCleanupFailure(
+  env: Env,
+  entry: PendingCleanup,
+  reason: 'aws-error' | 'snapshot-error-state',
+  errorMessage: string,
+): Promise<void> {
+  const ok = await shouldNotify(
+    env.SERVER_STATE,
+    `volume-cleanup:${entry.volumeId}`,
+    FAILURE_NOTIFY_TTL_SECONDS,
+  );
+  if (!ok) return;
+
+  const embed = buildCronFailureNotification({
+    eventType: 'volume-cleanup',
+    gameId: entry.gameId,
+    resourceId: entry.volumeId,
+    reason,
+    errorMessage,
+  });
+  await postDiscordWebhookMessage(env, { embeds: [embed] });
 }

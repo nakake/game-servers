@@ -26,8 +26,14 @@ import {
   GAME_WORLD_SNAPSHOT_TAG_KEY,
   GAME_WORLD_SNAPSHOT_TAG_VALUE,
 } from '../lib/aws/index.js';
+import { buildCronFailureNotification } from '../lib/discord/notifications.js';
+import { postDiscordWebhookMessage } from '../lib/discord/webhook.js';
 import { listGames } from '../lib/registry/store.js';
+import { shouldNotify } from '../lib/state/notif-suppress.js';
 import type { Env } from '../env.js';
+
+// 同一 game の retention 失敗は 1 時間 1 回まで通知 (Cron は 5 分間隔なので最悪 12 連投を 1 連投に圧縮)。
+const FAILURE_NOTIFY_TTL_SECONDS = 3600;
 
 export async function handleSnapshotRetention(env: Env): Promise<void> {
   const ec2 = new AwsApiClient({
@@ -76,6 +82,29 @@ export async function handleSnapshotRetention(env: Env): Promise<void> {
     } catch (err) {
       // 1 ゲームの失敗で他ゲームを巻き込まない。次 tick で再試行される。
       console.error(`snapshot retention: failed for ${game.game_id}:`, err);
+      await notifyRetentionFailure(env, game.game_id, err).catch((notifyErr) =>
+        console.error(`snapshot retention: notify failed for ${game.game_id}:`, notifyErr),
+      );
     }
   }
+}
+
+// Discord webhook で snapshot-retention の失敗を通知する。1 時間 1 回まで (game 単位)。
+// 通知側の失敗は呼び出し側で catch する (本 cron 自体は止めない)。
+async function notifyRetentionFailure(env: Env, gameId: string, err: unknown): Promise<void> {
+  const ok = await shouldNotify(
+    env.SERVER_STATE,
+    `snapshot-retention:${gameId}`,
+    FAILURE_NOTIFY_TTL_SECONDS,
+  );
+  if (!ok) return;
+
+  const embed = buildCronFailureNotification({
+    eventType: 'snapshot-retention',
+    gameId,
+    resourceId: gameId, // game 単位の失敗 (snapshot ID 特定前 / 全 snapshot 共通)
+    reason: 'aws-error',
+    errorMessage: err instanceof Error ? err.message : String(err),
+  });
+  await postDiscordWebhookMessage(env, { embeds: [embed] });
 }

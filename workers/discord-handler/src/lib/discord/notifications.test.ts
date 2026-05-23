@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
-import { buildIdleStopNotification } from './notifications.js';
+import {
+  buildCronFailureNotification,
+  buildIdleStopNotification,
+} from './notifications.js';
 import type {
   StopWorkflowOutcome,
 } from '../../handlers/stop-workflow.js';
@@ -139,5 +142,89 @@ describe('buildIdleStopNotification', () => {
       const embed = buildIdleStopNotification(GAME, outcome, 'sidecar');
       expect(embed?.footer).toBeUndefined();
     });
+  });
+});
+
+describe('buildCronFailureNotification', () => {
+  it('snapshot-retention aws-error: title / color / resource / error head + game line', () => {
+    const embed = buildCronFailureNotification({
+      eventType: 'snapshot-retention',
+      gameId: 'atm11',
+      resourceId: 'atm11',
+      reason: 'aws-error',
+      errorMessage: 'EC2 DescribeSnapshots threw: RequestLimitExceeded',
+    });
+    expect(embed.title).toBe('⚠️ snapshot 世代管理の Cron が失敗しました');
+    expect(embed.color).toBe(0xf39c12);
+    const description = embed.description as string;
+    expect(description).toContain('game: `atm11`');
+    expect(description).toContain('resource: `atm11`');
+    expect(description).toContain('RequestLimitExceeded');
+    expect(description).toContain('1 時間に 1 回まで通知');
+  });
+
+  it('volume-cleanup snapshot-error-state: 専用文面で手動対応の必要を明示', () => {
+    const embed = buildCronFailureNotification({
+      eventType: 'volume-cleanup',
+      gameId: 'atm11',
+      resourceId: 'vol-deadbeef',
+      reason: 'snapshot-error-state',
+      errorMessage: 'snapshot snap-bad entered AWS error state',
+    });
+    expect(embed.title).toBe('⚠️ volume cleanup の Cron が失敗しました');
+    const description = embed.description as string;
+    expect(description).toContain('vol-deadbeef');
+    expect(description).toContain('snapshot が AWS 側で **error state** に落ちました');
+    expect(description).toContain('手動で AWS コンソール確認が必要');
+  });
+
+  it('volume-cleanup aws-error: 「次 tick で再試行」を明示 (snapshot-error-state とは別文面)', () => {
+    const embed = buildCronFailureNotification({
+      eventType: 'volume-cleanup',
+      gameId: 'atm11',
+      resourceId: 'vol-x',
+      reason: 'aws-error',
+      errorMessage: 'AccessDenied',
+    });
+    const description = embed.description as string;
+    expect(description).toContain('次 tick で再試行');
+    expect(description).not.toContain('手動で AWS コンソール');
+  });
+
+  it('omits game line when gameId is undefined (cleanup で entry 紐づけ失敗の保険ケース)', () => {
+    const embed = buildCronFailureNotification({
+      eventType: 'volume-cleanup',
+      resourceId: 'vol-orphan',
+      reason: 'aws-error',
+      errorMessage: 'err',
+    });
+    const description = embed.description as string;
+    expect(description).not.toMatch(/^game: /m);
+    expect(description).toContain('resource: `vol-orphan`');
+  });
+
+  it('truncates errorMessage longer than 300 chars and marks (truncated)', () => {
+    const embed = buildCronFailureNotification({
+      eventType: 'snapshot-retention',
+      gameId: 'atm11',
+      resourceId: 'atm11',
+      reason: 'aws-error',
+      // 描画ロジック側の固定文に含まれない文字 ('Z') を payload に使い、純粋に payload 由来分のみ数える。
+      errorMessage: 'Z'.repeat(1000),
+    });
+    const description = embed.description as string;
+    expect((description.match(/Z/g) ?? []).length).toBe(300);
+    expect(description).toContain('…(truncated)');
+  });
+
+  it('sets ISO timestamp (Discord 側で投稿日時表示に使う)', () => {
+    const embed = buildCronFailureNotification({
+      eventType: 'snapshot-retention',
+      resourceId: 'r',
+      reason: 'aws-error',
+      errorMessage: 'e',
+    });
+    expect(typeof embed.timestamp).toBe('string');
+    expect(() => new Date(embed.timestamp as string).toISOString()).not.toThrow();
   });
 });

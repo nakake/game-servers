@@ -19,6 +19,10 @@ import type { GameDefinition } from '../registry/types.js';
 const COLOR_INFO = 0x3498db;     // blue (idle stop 完了)
 const COLOR_WARNING = 0xf39c12;  // orange (idle stop 失敗 / snapshot 失敗)
 
+// Cron 失敗通知の文面に出る最大文字数 (Discord embed description は 4096 上限だが、
+// stack trace まで貼ると読みづらい。先頭 300 chars で打ち切る、Phase 4 計画 Step 4)。
+const ERROR_HEAD_MAX = 300;
+
 const TRIGGER_LABEL: Record<StopTrigger, string> = {
   discord: 'Discord /stop',
   sidecar: 'sidecar (idle 検知)',
@@ -89,5 +93,64 @@ export function buildIdleStopNotification(
     color: COLOR_INFO,
     timestamp: new Date().toISOString(),
     footer: { text: `instance: ${outcome.instanceId}` },
+  };
+}
+
+// Cron 失敗通知 (snapshot-retention / volume-cleanup の Worker Cron が AWS API 失敗 or
+// snapshot が "error" 状態だったケース)。Phase 4 Step 4 計画 §C 参照。
+//
+// 連投抑制は呼び出し側の `lib/state/notif-suppress.ts shouldNotify` で行う。本関数は embed
+// 整形のみ (純粋関数なので unit test しやすい)。
+export type CronFailureEventType = 'snapshot-retention' | 'volume-cleanup';
+
+export interface CronFailureContext {
+  eventType: CronFailureEventType;
+  // 紐づくゲーム ID (snapshot-retention は必ず付く、volume-cleanup は volume の予約に紐づく場合のみ)。
+  gameId?: string;
+  // 失敗対象の AWS リソース ID (snap-... / vol-...)。アクション可能な情報なので必須。
+  resourceId: string;
+  // 'aws-error': DescribeSnapshots / DeleteSnapshot / DeleteVolume などの例外
+  // 'snapshot-error-state': snapshot 自体が AWS 側で error state に落ちた (volume 削除を中止)
+  reason: 'aws-error' | 'snapshot-error-state';
+  // Error.message 等。先頭 ERROR_HEAD_MAX で truncate される。
+  errorMessage: string;
+}
+
+export function buildCronFailureNotification(ctx: CronFailureContext): Record<string, unknown> {
+  const titleByEvent: Record<CronFailureEventType, string> = {
+    'snapshot-retention': '⚠️ snapshot 世代管理の Cron が失敗しました',
+    'volume-cleanup': '⚠️ volume cleanup の Cron が失敗しました',
+  };
+
+  const lines: string[] = [];
+  if (ctx.gameId !== undefined) {
+    lines.push(`game: \`${ctx.gameId}\``);
+  }
+  lines.push(`resource: \`${ctx.resourceId}\``);
+
+  if (ctx.reason === 'snapshot-error-state') {
+    lines.push(
+      'snapshot が AWS 側で **error state** に落ちました。' +
+        '対応する volume は削除せず保持しています (手動で AWS コンソール確認が必要)。',
+    );
+  } else {
+    lines.push('Cron 内の AWS API 呼び出しが例外で落ちました。次 tick で再試行されます。');
+  }
+
+  const errorHead =
+    ctx.errorMessage.length > ERROR_HEAD_MAX
+      ? `${ctx.errorMessage.slice(0, ERROR_HEAD_MAX)}\n…(truncated)`
+      : ctx.errorMessage;
+  lines.push('', '```', errorHead, '```');
+  lines.push(
+    '',
+    '※ 1 時間に 1 回まで通知します (同じリソース ID の連投は抑制)。',
+  );
+
+  return {
+    title: titleByEvent[ctx.eventType],
+    description: lines.join('\n'),
+    color: COLOR_WARNING,
+    timestamp: new Date().toISOString(),
   };
 }
