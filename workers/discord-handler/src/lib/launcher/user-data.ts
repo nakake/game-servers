@@ -191,11 +191,14 @@ if [ -f ${SIDECAR_IMAGE_TAR_PATH} ]; then
 else
   echo "[user-data] sidecar tar not found at ${SIDECAR_IMAGE_TAR_PATH} — AMI may be pre-Step-7"
 fi
-# --network host で同 instance の game container の RCON (localhost:25575) にアクセスする。
-# SSM secret / IMDSv2 取得は host network の link-local で sidecar 内部から直接呼ぶ。
+# --network container:<game> で game container の network namespace を共有 → 127.0.0.1:25575
+# (RCON) に直接アクセスできる。RCON は意図的に host の port mapping を持たない設計のため、
+# host network namespace 経由だと sidecar から RCON listener が見えず ECONNREFUSED になる。
+# IMDSv2 (169.254.169.254) は link-local routing で network namespace に依存せず届く。
+# game container が落ちると sidecar の network も失効して exit する想定 (Cron フォールバックが拾う)。
 docker run -d \\
   --name sidecar \\
-  --network host \\
+  --network container:${containerName} \\
   --restart unless-stopped \\
   -e GAME_ID=${shellEscape(game.game_id)} \\
   -e WORKER_URL=${shellEscape(normalizedWorkerUrl)} \\

@@ -53,7 +53,9 @@ describe('buildUserData — sidecar block (Phase 3 Step 6)', () => {
 
     expect(ud).toContain('docker run -d');
     expect(ud).toContain('--name sidecar');
-    expect(ud).toContain('--network host');
+    // sidecar は game container の network namespace を共有して localhost:25575 RCON にアクセスする
+    expect(ud).toContain('--network container:atm11');
+    expect(ud).not.toContain('--network host');
     expect(ud).toContain('--restart unless-stopped');
     expect(ud).toContain("-e GAME_ID='atm11'");
     expect(ud).toContain("-e WORKER_URL='https://discord-handler.example.workers.dev'");
