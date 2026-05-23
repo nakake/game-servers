@@ -243,14 +243,19 @@ Worker コード変更: **あり**。デプロイは Step 8。`WORKER_PUBLIC_URL
 
 Infra 変更: **あり** (新 SSM Parameter + Launch Template image_id 切替)。`apply` は分類器のためユーザー実行 (memory: terraform-aws-credential-bridge)。
 
-### Step 8: デプロイ + ATM11 実機確認  *(未着手)*
+### Step 8: デプロイ + ATM11 実機確認  *(未着手 — ユーザー実機)*
+
+詳細手順は `docs/runbook-phase3-sidecar.md` **Step 6** (= Phase 3 plan の Step 8 に対応)
+を参照。本セクションは Phase 3 plan 上のチェックリスト。
 
 - [ ] `pnpm deploy` で Worker を本番反映 (sidecar ルート + Cron フォールバック含む)
-- [ ] `/start atm11` → 起動完了 → sidecar が heartbeat を送り始めることを `wrangler tail` で確認
+- [ ] `/start atm11` → 起動完了 → sidecar が heartbeat を送り始めることを `wrangler tail` で確認 (runbook §6.3)
 - [ ] プレイヤーが 1 人接続 → 切断 → 10 分放置
-- [ ] sidecar から `/sidecar/idle-detected` が飛び、`runStopWorkflow` が走って ATM11 が停止することを確認 (Discord にも停止通知が届く設計なら確認)
-- [ ] **Cron フォールバックの動作確認**: テスト用に sidecar を `docker stop sidecar` で殺した状態を再現し、`timeout_min + 5min` 後に Cron が `runStopWorkflow` を発火させることを確認 (heartbeat が来ない状態で last_seen が古くなる経路)
-- [ ] 再 `/start atm11` で world が永続していることを確認 (snapshot 復元が壊れていないか回帰)
+- [ ] sidecar から `/sidecar/idle-detected` が飛び、`runStopWorkflow` が走って ATM11 が停止することを確認 (runbook §6.4)
+- [ ] **Cron フォールバックの動作確認**: sidecar を `docker stop sidecar && docker rm sidecar` で殺し、`timeout_min + 5min` (~15 分) 後に Cron が `runStopWorkflow` を発火させることを確認 (runbook §6.5)
+- [ ] `/start` 直後の grace 期間で誤停止しない (runbook §6.6)
+- [ ] 再 `/start atm11` で world が永続していることを確認 (runbook §6.7)
+- [ ] Discord 手動 `/stop atm11` が引き続き動く (runbook §6.8)
 
 Worker / sidecar / AMI 変更: なし (デプロイのみ)。`wrangler deploy` と Discord 実機操作はユーザーが実施。
 

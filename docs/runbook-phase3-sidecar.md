@@ -232,10 +232,123 @@ aws ec2 run-instances `
 確認後は `aws ec2 terminate-instances --instance-ids ...` で停止。本格的な ATM11 起動・停止
 確認は Step 8 で行う (本書のスコープ外)。
 
-## Step 6: 動作確認 (Step 8 で再テストするので軽め)
+## Step 6: デプロイ + ATM11 実機確認 (Phase 3 plan の Step 8)
 
-実機の動作確認は `docs/phase3-plan.md` の Step 8 (デプロイ + ATM11 実機確認) で行う。本 Step
-では「投入 + AMI build まで完了した」だけを確認する。
+Worker / sidecar / AMI / Secrets がすべて揃ったらここで本番反映 + 実機テスト。これが Phase 3
+のゴール「ATM11 を放置で勝手に停止」の最終検証。
+
+### 6.1 Worker をデプロイ
+
+```powershell
+cd F:\project\game_servers\workers\discord-handler
+pnpm deploy
+```
+
+期待出力:
+- "Your worker has access to the following bindings:" に **SERVER_STATE / GAME_REGISTRY**
+  (KV) と **WORKER_PUBLIC_URL** (vars) が出る
+- `pnpm wrangler secret list` で `SIDECAR_HMAC_SECRETS` が出る (deploy 時には表示されない)
+- "Published" 行に Worker URL が表示される
+
+> 失敗例 — `Missing binding: SIDECAR_HMAC_SECRETS`: Step 2 が未実行。`pnpm wrangler secret put SIDECAR_HMAC_SECRETS` を先に。
+
+### 6.2 別シェルで `wrangler tail` を起動
+
+```powershell
+cd F:\project\game_servers\workers\discord-handler
+pnpm wrangler tail
+```
+
+Phase 3 で追加した経路のログが流れる。本 Step で観察すべきパターン:
+- `[stop-workflow] ...` — Discord `/stop` / sidecar / cron-fallback いずれの経路でも出る
+- `[sidecar idle-detected] atm11 ...` — sidecar 経由 idle 通知
+- `[idle-fallback] atm11 ...` — Cron フォールバック (5 分 cron)
+- `sidecar heartbeat rejected: ...` — HMAC 不整合 (Step 1/2 の secret 取り違え疑い)
+
+### 6.3 `/start atm11` で sidecar 経路が動くことを観察
+
+Discord で `/start atm11` 実行。期待される流れ:
+
+1. Discord 応答 `🚀 ATM11 を起動しています…` (3 秒以内)
+2. wrangler tail に EC2 起動 / EBS mount / docker run / SNS ready 通知 系のログ
+3. **sidecar が立ち上がる** = `POST /sidecar/heartbeat` が 204 で 1 分間隔
+4. Discord に ready 通知 `✅ ATM11 接続可能になりました ...`
+
+KV を直接覗いて sidecar の last_seen を確認:
+
+```powershell
+pnpm wrangler kv key get 'last-seen:atm11' --binding SERVER_STATE --remote
+# → {"gameId":"atm11","instanceId":"i-...","lastSeenAt":"2026-05-23T...","playerCount":-1 or 0}
+```
+
+> 起動直後は RCON が立ち上がるまで `playerCount: -1` (adapter 失敗の保守値) が続く。
+> ATM11 ready 後は 0 (誰も接続していない) になる。
+
+### 6.4 通常 idle 経路の検証 (sidecar 発火)
+
+1. Minecraft クライアントで 1 人接続 → 数分プレイ → 切断
+2. **10 分待つ** (`atm11.idle_check.timeout_min: 10`)
+3. wrangler tail で順に観察:
+   - `[stop-workflow] ⏳ docker stop 発火: ...`
+   - `[sidecar idle-detected] atm11 (expected=i-...): {"status":"ok",...}`
+   - `[stop-workflow] ⏳ snapshot ... 作成中`
+   - terminate / DNS reset / pending cleanup 登録
+4. AWS console で EC2 が `terminated` に、game-world snapshot が新規作成されていることを確認
+
+### 6.5 Cron フォールバック経路の検証 (sidecar 強制停止)
+
+sidecar を意図的に殺して、Cron が代わりに stop することを見る:
+
+1. Discord で `/start atm11` (新しい instance を起動、ready 待ち)
+2. AWS SSM Session Manager で EC2 にログイン (or SSH):
+   ```bash
+   sudo docker stop sidecar
+   sudo docker rm sidecar    # `--restart unless-stopped` で蘇生しないよう削除
+   ```
+3. **約 15 分待つ** (`timeout_min` 10 + Cron フォールバック skew 5)。Cron は 5 分ごとなので
+   ぴったり 15 分ではなく次の 5 分境界で発火 → 最大 20 分かかる
+4. wrangler tail で順に観察:
+   - `[idle-fallback] atm11 silent for 15 min (threshold 15 min). forcing stop.`
+   - `[stop-workflow] ... (cron-fallback)`
+5. EC2 が terminate される
+
+### 6.6 grace 期間で誤停止しない確認
+
+Cron フォールバックは `last_seen` キーが無ければ skip する。起動直後の grace で誤発火しない
+ことを確認:
+
+1. (上の 6.5 を実行した直後 = `last-seen:atm11` キーが TTL 切れか KV から消えている状態)
+2. **sidecar を立てずに** atm11 だけ手動起動するシナリオを再現するのは煩雑なので、ログ観察で代替:
+   - wrangler tail を起動した状態で次の Cron まで待つ
+   - `[idle-fallback]` のログが出ないこと (`skip (no-heartbeat)` は `console.log` を抑制してあるため出ない設計、stop workflow も発火しないことだけが要件)
+3. **stop workflow が発火していない** ことを確認 (= EC2 が terminate されない)
+
+### 6.7 world 永続性の回帰
+
+1. 6.4 (or 6.5) で stop した直後に Discord で `/start atm11`
+2. Minecraft クライアントで接続 → **前回プレイした地点に居る**、設置したブロックが残っている
+3. これが通れば Step 1〜7 の通り snapshot → 新 volume 復元の経路が壊れていない
+
+### 6.8 Discord 手動 `/stop` の回帰
+
+Phase 1 の経路を壊していないことを確認:
+
+1. Discord で `/start atm11`
+2. ready 後すぐに Discord で `/stop atm11` (手動)
+3. wrangler tail に `[stop-workflow] ... (discord)` が出る (`triggeredBy: 'discord'`)
+4. Discord に `✅ ATM11 を停止しました …` と完了通知
+
+### Phase 3 完了基準 (本 Step で green にする)
+
+`docs/phase3-plan.md` の **完了基準** セクションのチェックボックスを順次埋める:
+
+- [ ] ATM11 で `/start` 後にプレイヤー 0 状態を 10 分続けると、手動 `/stop` 無しで snapshot + terminate が走る (6.4)
+- [ ] sidecar 強制停止後も Cron フォールバックが ~15 分後に EC2 を停止する (6.5)
+- [ ] `/start` 直後の grace で誤停止しない (6.6)
+- [ ] Discord `/stop` が引き続き動く (6.8)
+- [ ] world 永続性 (6.7)
+
+すべて緑になったら Step 9 (ドキュメント更新 + Phase 3 完了マーク、`docs/phase3-plan.md`) に進む。
 
 ## 新ゲーム追加時の手順 (将来 Phase 6 で参照)
 
