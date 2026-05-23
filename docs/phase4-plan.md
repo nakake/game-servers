@@ -1,6 +1,6 @@
 # Phase 4 実装計画 — 通知拡張 (idle 停止 / Spot 中断 / snapshot 失敗)
 
-最終更新: 2026-05-24 (Step 2 完了 — idle 停止通知を runStopWorkflow に組み込み、unit test 12 ケース追加、66/66 通過)
+最終更新: 2026-05-24 (Step 3 完了 — Spot 中断専用整形 + aws-notification unit test + 実機検証 runbook)
 
 ## このドキュメントについて
 
@@ -99,18 +99,27 @@ Worker コード変更: **あり (リファクタ + 新規 helper)**。挙動変
 
 Worker コード変更: **あり**。デプロイは Step 5。
 
-### Step 3: Spot 中断警告 (B) の整形強化 + 実機検証  *(未着手)*
+### Step 3: Spot 中断警告 (B) の整形強化 + 実機検証準備  *(コード完了 2026-05-24、実機は Step 5)*
 
-既存経路 (`/aws/notification` → `inferSeverity = critical` → embed) が動いているはず。本 Step
-では:
+既存経路 (`/aws/notification` → `inferSeverity = critical` → embed) が動いている前提で、
+description 整形を Spot 中断専用に差し替えた。実機検証手順は Step 5 に集約。
 
-- [ ] **動作確認 (実機)**: 起動中の ATM11 に `aws ec2 send-spot-instance-interruption --instance-ids <i-...>` で interruption 通知を発火 → EventBridge → SNS → Worker → Discord で critical embed が出ることを確認
-- [ ] **メッセージ整形の検討**: 現状の `inferSeverity` + `buildDiscordEmbed` の出力で「2 分以内に terminate される」「graceful stop の機会を逃さないため Discord 上で通知」が伝わるかレビュー。物足りなければ aws-notification.ts に `Spot Instance Interruption Warning` 専用の整形分岐を追加
-  - 案: subject に "Spot interruption" を含む場合、description の先頭に `⚠️ **2 分以内に Spot 中断されます。** 自動 stop か手動 stop の判断を:` を追加
-- [ ] (任意) 2 分以内に **graceful stop を自動発火** する仕様を入れるか検討 → これは Phase 4 でやらず、Phase 5 以降の「Spot 中断対応」として持ち越す可能性 (本 Step では通知だけ)
-- [ ] テスト: aws-notification の既存ユニットテストが無い場合、`inferSeverity` の "interruption" 入り subject ケースだけテスト追加
+- [x] **メッセージ整形強化**: `aws-notification.ts` に `isSpotInterruptionMessage(msg)` と
+  `buildSpotInterruptionEmbed(msg)` を追加。EventBridge `input_template` の prefix
+  (`"Spot interruption warning:"`) で検出し、description 先頭に「⚠️ 約 2 分以内に EC2 が
+  Spot reclaim されます。今すぐ手動 `/stop` を…」を出す。原文 (instance-id / region / action)
+  は `---` 区切りで残す。
+- [x] **理由**: EventBridge input_transformer は SNS Subject を載せないため、generic 整形だと
+  title が `🚨 AWS notification` になり一目で内容が分からない (調査済、`infra/envs/prod/eventbridge.tf` Step 9 調査)
+- [x] **テスト**: `aws-notification.test.ts` 新規 9 ケース。`inferSeverity` の critical / warning / info
+  判定、`isSpotInterruptionMessage` の prefix detection (case-sensitive、中間一致しない、
+  unrelated alert false)
+- [x] **実機検証手順**: `docs/runbook-phase4-notifications.md` 新規 §B に
+  `aws ec2 send-spot-instance-interruption` のコマンド + 期待 embed + トラブルシュート観点
+- [ ] **実機検証 (実行)**: Step 5 でユーザーが手元から発火させて Discord channel 観察
+- [-] **(任意) 自動 graceful stop**: Phase 4 では入れない (design.md §11 Open Question、Phase 5+ で再評価)
 
-Worker コード変更: **小** (専用整形を入れる場合のみ)。Infra 変更: なし。
+Worker コード変更: **あり (専用整形 + helper export)**。Infra 変更: なし。
 
 ### Step 4: snapshot 削除失敗通知 (C)  *(未着手)*
 

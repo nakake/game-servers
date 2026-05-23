@@ -189,7 +189,7 @@ async function deliverGameReady(gameId: string, env: Env): Promise<void> {
   await deletePendingReady(env.SERVER_STATE, gameId).catch(() => undefined);
 }
 
-function inferSeverity(msg: SnsNotification): Severity {
+export function inferSeverity(msg: SnsNotification): Severity {
   // Subject ベースで判定。実運用では SNS 側で message attribute に severity を載せる手もある。
   const subject = msg.Subject ?? '';
   const text = `${subject}\n${msg.Message}`.toLowerCase();
@@ -213,6 +213,13 @@ function inferSeverity(msg: SnsNotification): Severity {
 }
 
 function buildDiscordEmbed(msg: SnsNotification, severity: Severity): Record<string, unknown> {
+  // EventBridge → SNS で input_transformer により整形された Spot 中断警告は専用整形で出す。
+  // Subject が空 (EventBridge input_transformer は Subject を載せない) のため、generic 整形に
+  // 任せると title が "AWS notification" になってしまい一目で内容が分からない。
+  if (isSpotInterruptionMessage(msg)) {
+    return buildSpotInterruptionEmbed(msg);
+  }
+
   const color =
     severity === 'critical' ? COLOR_CRITICAL : severity === 'warning' ? COLOR_WARNING : COLOR_INFO;
   const icon = severity === 'critical' ? '🚨' : severity === 'warning' ? '⚠️' : 'ℹ️';
@@ -226,6 +233,35 @@ function buildDiscordEmbed(msg: SnsNotification, severity: Severity): Record<str
     title: `${icon} ${msg.Subject ?? 'AWS notification'}`,
     description,
     color,
+    timestamp: msg.Timestamp,
+    footer: { text: msg.TopicArn },
+  };
+}
+
+// EventBridge rule `gs-spot-interruption-warning` (infra/envs/prod/eventbridge.tf) の
+// input_template が "Spot interruption warning: ..." で始まる固定文を SNS に流す契約。
+// この prefix を見て判定する (Subject は EventBridge input_transformer 経由だと空)。
+export function isSpotInterruptionMessage(msg: SnsNotification): boolean {
+  return msg.Message.startsWith('Spot interruption warning:');
+}
+
+// Spot 中断警告専用 embed。critical color + 「2 分以内に reclaim、手動 /stop でしか間に合わない」
+// を 1 行目に出して、原文 (instance-id / region / action / time) を付録として残す。
+//
+// design.md §11 の Open Question「Spot 中断時の自動 graceful stop」は本フェーズでは見送り
+// (Phase 4 計画 Step 3、決定: Phase 5+ で再評価)。ユーザーが Discord を見て手動 /stop する
+// しか道が無いため、message では行動を急かす文面を最優先にする。
+function buildSpotInterruptionEmbed(msg: SnsNotification): Record<string, unknown> {
+  const description =
+    '⚠️ **約 2 分以内に EC2 が Spot reclaim されます。**\n' +
+    'セーブを優先したい場合は今すぐ手動 `/stop` を叩いてください ' +
+    '(本フェーズでは自動 graceful stop は走りません)。\n\n' +
+    `---\n${msg.Message}`;
+
+  return {
+    title: '🚨 Spot 中断警告 (約 2 分で EC2 回収)',
+    description,
+    color: COLOR_CRITICAL,
     timestamp: msg.Timestamp,
     footer: { text: msg.TopicArn },
   };
