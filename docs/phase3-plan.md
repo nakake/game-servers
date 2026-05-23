@@ -198,16 +198,21 @@ Worker / sidecar コード変更: なし。
 > エラーになる。Step 6 (docker-compose + user-data) や Step 7 (AMI 再ビルド) は Step 5 の
 > ユーザー実行と並行で進めて構わない (Worker デプロイは Step 8 まで待つ)。
 
-### Step 6: docker-compose + user-data に sidecar 起動を組み込む  *(未着手)*
+### Step 6: docker-compose + user-data に sidecar 起動を組み込む  *(完了 2026-05-23)*
 
-- [ ] `launcher/images/atm11/docker-compose.yml` に `sidecar` サービスを追加 (ローカル検証用)。ゲーム本体 `atm11` と同じネットワークで localhost RCON 接続できるよう設定。`stop_grace_period: 10s`
-- [ ] `workers/discord-handler/src/lib/launcher/user-data.ts` の `buildUserData` に sidecar 起動を追加:
-  - `docker run -d --name sidecar --network host -e GAME_ID=<id> -e WORKER_URL=<base_url> --restart unless-stopped <sidecar_image_ref>` (host network で localhost:25575 RCON にアクセス、SSM 取得は IMDSv2 経由)
-  - sidecar イメージ参照は AMI 内のローカル tar から `docker load` した後の固定タグ (例: `gs-sidecar:latest`)
-- [ ] `user-data.test.ts` 既存テストに sidecar 行が含まれるアサーションを追加
-- [ ] `pnpm typecheck` 通過
+- [x] `launcher/images/atm11/docker-compose.yml` に `sidecar` サービスを追加 (ローカル検証用)。`network_mode: "service:atm11"` で atm11 のネットワーク namespace に相乗り → localhost:25575 RCON にアクセス。`restart: "on-failure:3"` でローカル SSM 不在によるクラッシュループを抑制。`stop_grace_period: 10s`
+- [x] `launcher/images/atm11/.env.example` に `WORKER_URL` (ローカル `pnpm dev` 用 `http://host.docker.internal:8787`) を追記
+- [x] `workers/discord-handler/src/lib/launcher/user-data.ts` の `buildUserData` を拡張:
+  - `BuildUserDataOptions` に `workerPublicUrl` (必須) + `sidecarImage` (optional、default `gs-sidecar:latest`) を追加
+  - atm11 docker run の **直後** (ready 検知の前) に sidecar の `docker load` + `docker run -d --network host --restart unless-stopped` を生成。`-e GAME_ID / WORKER_URL / AWS_REGION`、sidecar 失敗時は `|| echo "..."` で non-fatal (Cron フォールバックが拾う)
+  - AMI 内 `/var/lib/sidecar-image.tar` の存在チェック付き `docker load` → AMI pre-Step-7 でも user-data が爆死しない
+  - workerPublicUrl の末尾スラッシュは正規化
+- [x] `env.ts` に `WORKER_PUBLIC_URL` (必須) + `SIDECAR_IMAGE_REF` (optional) を追加。`start.ts` の `buildUserData` 呼び出しを更新 (env から渡す)
+- [x] `wrangler.toml [vars]` に `WORKER_PUBLIC_URL` を placeholder で追加 (実値は runbook §Step 3 でユーザーが書き換え)
+- [x] `user-data.test.ts` 新規 (12 ケース: sidecar 行存在 + env / 末尾スラッシュ正規化 / sidecarImage override / docker load 同梱 / 配置順序 / build-pull 分岐 / formatBlankVolume / RCON SSM / SNS optional)
+- [x] `pnpm typecheck` / `pnpm test` (43/43 pass) / `pnpm build` (dry-run、bindings に WORKER_PUBLIC_URL 出現) 通過
 
-Worker コード変更: **あり**。デプロイは Step 8。
+Worker コード変更: **あり**。デプロイは Step 8。`WORKER_PUBLIC_URL` の本番 URL 書き換え + sidecar HMAC secret 投入 (Step 5) はユーザー実行 (runbook-phase3-sidecar.md §Step 1〜3 参照)。
 
 ### Step 7: AMI 再ビルド (sidecar イメージ焼き込み)  *(未着手)*
 

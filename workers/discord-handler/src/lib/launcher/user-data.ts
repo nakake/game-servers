@@ -28,6 +28,10 @@ export interface BuildUserDataOptions {
   readyNotifySnsTopicArn?: string;
   // ready 通知に出す FQDN (例: atm11.example.com)
   fqdn?: string;
+  // Worker 自身の公開 URL (Phase 3: sidecar の WORKER_URL env)
+  workerPublicUrl: string;
+  // AMI 内に焼き込まれた sidecar image のタグ。省略時 'gs-sidecar:latest' (Packer の load 時タグ)。
+  sidecarImage?: string;
 }
 
 // /dev/sdf で attach した EBS は EC2 内で /dev/nvme1n1 として見える。
@@ -41,8 +45,23 @@ const CONTAINER_UID = 1000;
 const READY_POLL_INTERVAL_SEC = 5;
 const READY_POLL_COUNT = 240;
 
+// Phase 3: sidecar image のデフォルトタグ。Packer (Step 7) が `docker load` するときの tag。
+const DEFAULT_SIDECAR_IMAGE = 'gs-sidecar:latest';
+// AMI 内に同梱された sidecar の tar ファイル (Step 7 で Packer が配置)。
+const SIDECAR_IMAGE_TAR_PATH = '/var/lib/sidecar-image.tar';
+
 export function buildUserData(opts: BuildUserDataOptions): string {
-  const { game, awsRegion, formatBlankVolume, readyNotifySnsTopicArn, fqdn } = opts;
+  const {
+    game,
+    awsRegion,
+    formatBlankVolume,
+    readyNotifySnsTopicArn,
+    fqdn,
+    workerPublicUrl,
+    sidecarImage = DEFAULT_SIDECAR_IMAGE,
+  } = opts;
+  // 末尾スラッシュは sidecar 側でも削るが、user-data 段階で正規化しておく。
+  const normalizedWorkerUrl = workerPublicUrl.replace(/\/+$/, '');
   const containerName = game.game_id;
   const dataDir = `/opt/${game.game_id}`;
   const launcherDir = `/opt/launcher/${game.game_id}`;
@@ -163,6 +182,26 @@ ${envFromRegistry} \\
 ${rconSsmPath !== undefined ? '  -e RCON_PASSWORD="$RCON_PASSWORD" \\\n' : ''}  --restart=no \\
   ${imageRef}
 echo "[user-data] container started"
+
+# ---- 4.5. sidecar 起動 (Phase 3: idle 検知 + Worker への heartbeat) ----
+# AMI 内に Packer が \`docker save\` した tar が同梱されている前提 (Step 7)。
+# 初回起動時のみ load、以降は image cache が効くので idempotent。
+if [ -f ${SIDECAR_IMAGE_TAR_PATH} ]; then
+  docker load -i ${SIDECAR_IMAGE_TAR_PATH} || echo "[user-data] sidecar image load failed (proceeding, image may already exist)"
+else
+  echo "[user-data] sidecar tar not found at ${SIDECAR_IMAGE_TAR_PATH} — AMI may be pre-Step-7"
+fi
+# --network host で同 instance の game container の RCON (localhost:25575) にアクセスする。
+# SSM secret / IMDSv2 取得は host network の link-local で sidecar 内部から直接呼ぶ。
+docker run -d \\
+  --name sidecar \\
+  --network host \\
+  --restart unless-stopped \\
+  -e GAME_ID=${shellEscape(game.game_id)} \\
+  -e WORKER_URL=${shellEscape(normalizedWorkerUrl)} \\
+  -e AWS_REGION=${shellEscape(awsRegion)} \\
+  ${sidecarImage} || echo "[user-data] sidecar docker run failed (non-fatal, fallback Cron will catch idle)"
+echo "[user-data] sidecar started"
 
 # ---- 5. ready 検知 (container log で MC 起動完了行を polling) ----
 ${

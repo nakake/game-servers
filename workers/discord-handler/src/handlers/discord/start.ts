@@ -156,6 +156,10 @@ async function executeStart(
         awsRegion,
         formatBlankVolume: snapshotId === undefined,
         fqdn,
+        workerPublicUrl: env.WORKER_PUBLIC_URL,
+        ...(env.SIDECAR_IMAGE_REF !== undefined && env.SIDECAR_IMAGE_REF !== ''
+          ? { sidecarImage: env.SIDECAR_IMAGE_REF }
+          : {}),
         ...(env.SNS_ALLOWED_TOPIC_ARN !== undefined && env.SNS_ALLOWED_TOPIC_ARN !== ''
           ? { readyNotifySnsTopicArn: env.SNS_ALLOWED_TOPIC_ARN }
           : {}),

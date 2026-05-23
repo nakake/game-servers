@@ -56,6 +56,15 @@ export interface Env {
   // 詳細は docs/phase3-plan.md 決定10。
   SIDECAR_HMAC_SECRETS: string;
 
+  // ---- Sidecar 配信 (Phase 3) ----
+  // Worker 自身の公開 URL。EC2 user-data に焼いて sidecar の WORKER_URL env として渡す。
+  // 例: "https://discord-handler.<account>.workers.dev"。末尾スラッシュは sidecar 側で正規化される。
+  // 初回デプロイ後に `pnpm wrangler deploy` の出力から URL を取って wrangler.toml [vars] に書く。
+  WORKER_PUBLIC_URL: string;
+  // AMI 内に焼き込まれた sidecar image のタグ。省略時 'gs-sidecar:latest'。
+  // Phase 7 で Packer が `docker load` するときの tag と一致させる必要がある。
+  SIDECAR_IMAGE_REF?: string;
+
   // ---- KV bindings ----
   // /start 〜 ready 通知の間、interaction の文脈 (token / userId) を一時保存する。
   // Phase 3 から sidecar heartbeat の last_seen / runStopWorkflow の stop-in-progress

@@ -21,6 +21,9 @@ CLOUDFLARE_BASE_DOMAIN = "example.com"
 EC2_LAUNCH_TEMPLATE_ID = "<YOUR_LAUNCH_TEMPLATE_ID>"
 EC2_SUBNET_ID = "<YOUR_SUBNET_ID>"
 SNS_ALLOWED_TOPIC_ARN = "arn:aws:sns:ap-northeast-1:123456789012:gs-alerts"
+# Phase 3: Worker 自身の公開 URL。user-data に焼き込み sidecar の WORKER_URL env になる。
+# 初回 deploy 後に wrangler の出力 (https://discord-handler.<account>.workers.dev) を貼る。
+WORKER_PUBLIC_URL = "https://discord-handler.<your-account>.workers.dev"
 # ゲーム固有の値 (snapshot seed / cf_record_id / RCON SSM パス / launcher tarball) は
 # Phase 2 で registry.json (GAME_REGISTRY KV) に移管。ここには持たない。
 

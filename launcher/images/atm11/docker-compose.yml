@@ -35,3 +35,28 @@ services:
       RCON_PASSWORD: "${RCON_PASSWORD:?set RCON_PASSWORD in .env}"
       EULA: "TRUE"
     restart: "no"
+
+  # Phase 3 で導入された sidecar (idle 検知 + Worker への heartbeat)。
+  # ローカル検証では IAM 認証情報が無いため SSM 呼び出しが失敗して exit する。
+  # 「コンテナがビルド・起動できて、env の組立てが Worker と整合しているか」を見るだけの用途。
+  # 本番動作は EC2 上 (cloud-init の docker run) で確認する。
+  sidecar:
+    build:
+      context: ../../sidecar
+    image: gs-sidecar:dev
+    container_name: sidecar
+    # atm11 のネットワーク名前空間に相乗りすることで localhost:25575 RCON にアクセスする。
+    # 本番 (EC2) は `--network host` で同等のことを実現する (user-data.ts 参照)。
+    network_mode: "service:atm11"
+    depends_on:
+      - atm11
+    stop_grace_period: 10s
+    environment:
+      GAME_ID: "atm11"
+      # 別シェルで `cd workers/discord-handler && pnpm dev` を起動した wrangler dev を想定。
+      # Docker Desktop は host.docker.internal でホストの localhost に届く (Linux は要設定)。
+      WORKER_URL: "${WORKER_URL:-http://host.docker.internal:8787}"
+      AWS_REGION: "ap-northeast-1"
+      # ローカル AWS profile を sidecar に渡したい場合は AWS_PROFILE / aws-sdk credential を
+      # マウントする必要がある。Step 6 のスコープ外 (本番動作は EC2 instance role を使う)。
+    restart: "on-failure:3"
