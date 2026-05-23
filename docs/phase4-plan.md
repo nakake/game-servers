@@ -1,6 +1,6 @@
 # Phase 4 実装計画 — 通知拡張 (idle 停止 / Spot 中断 / snapshot 失敗)
 
-最終更新: 2026-05-24 (Step 1 完了 — webhook ヘルパー独立化、aws-notification 移植、テスト全通過)
+最終更新: 2026-05-24 (Step 2 完了 — idle 停止通知を runStopWorkflow に組み込み、unit test 12 ケース追加、66/66 通過)
 
 ## このドキュメントについて
 
@@ -82,18 +82,20 @@ Phase 4 で **やらない** (持ち越し):
 
 Worker コード変更: **あり (リファクタ + 新規 helper)**。挙動変化なし (既存 aws-notification の経路は同じ payload)。
 
-### Step 2: idle 停止通知 (A) を runStopWorkflow に組み込む  *(未着手)*
+### Step 2: idle 停止通知 (A) を runStopWorkflow に組み込む  *(完了 2026-05-24)*
 
 `runStopWorkflow` の最後で `triggeredBy !== 'discord'` のとき Discord に通知する。
 
-- [ ] `lib/discord/notifications.ts` 新規 (or `webhook.ts` に同居): `buildIdleStopNotification(game, outcome, triggeredBy)` を提供。返り値は Discord embed object
-  - title: `📴 ${game.display_name} を自動停止しました`
-  - color: info (`0x3498db`)
-  - description: `経路: sidecar / cron-fallback` を 1 行、snapshot ID / volume ID / dnsReset 等を補足行で
-- [ ] `runStopWorkflow` の return 直前で `if (opts.triggeredBy !== 'discord') { await sendIdleStopNotification(...) }` を追加。失敗は catch して `console.error` (停止フロー本体は影響受けない)
-- [ ] Discord `/stop` 経路 (`triggeredBy: 'discord'`) は **既存の followup edit が出る**ので webhook 通知は出さない (二重通知防止)
-- [ ] テスト: `runStopWorkflow` のロジック自体は引き続き既存テスト (なし、AWS SDK mock が必要) では検証しないが、`buildIdleStopNotification` の embed 内容を unit test (純粋関数)
-- [ ] `pnpm typecheck` / `pnpm test` / `pnpm build` 通過
+- [x] `lib/discord/notifications.ts` 新規: `buildIdleStopNotification(game, outcome, triggeredBy)` を純粋関数として提供
+  - `status: 'ok'` → 📴 info embed (color `0x3498db`)、description で経路 + snapshot/volume/dns の状態を表示
+  - `status: 'failed'` → ⚠️ warning embed (color `0xf39c12`)、エラー先頭 500 chars + 復旧ヒント
+  - `status: 'already-stopped'` / `triggeredBy === 'discord'` → `undefined` (通知スキップ、ノイズ抑制と二重通知防止)
+  - footer に instance ID、timestamp は ISO 文字列
+- [x] `runStopWorkflow` を 2 層化 (`runStopWorkflow` = ラッパ、`executeStopWorkflow` = 既存ロジック)。早期 return が複数あるため inner 関数を抽出し、ラッパ側で outcome を受けてから通知 → return
+- [x] Discord 経路は元 interaction の follow-up edit で通知されるため webhook 通知は出さない (`buildIdleStopNotification` 内で `triggeredBy === 'discord'` → undefined)
+- [x] 通知の post 失敗は `postDiscordWebhookMessage` 側が throw しない契約、加えて `runStopWorkflow` 内でも try/catch で console.error (停止フロー本体は影響受けない)
+- [x] テスト: `notifications.test.ts` 12 ケース (純粋関数なので AWS mock 不要)。Discord/already-stopped スキップ、ok 経路ラベル、各種 warning 分岐 (snapshot 失敗 / cleanup 失敗 / DNS 失敗)、failed 経路の error truncation + footer
+- [x] `pnpm typecheck` / `pnpm test` (66 全通過) / `pnpm build` 通過
 
 Worker コード変更: **あり**。デプロイは Step 5。
 

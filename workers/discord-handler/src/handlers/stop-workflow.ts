@@ -31,6 +31,8 @@ import {
   GAME_WORLD_SNAPSHOT_TAG_VALUE,
 } from '../lib/aws/index.js';
 import { CloudflareDnsClient } from '../lib/cloudflare/index.js';
+import { buildIdleStopNotification } from '../lib/discord/notifications.js';
+import { postDiscordWebhookMessage } from '../lib/discord/webhook.js';
 import { storePendingCleanup } from '../lib/state/pending-cleanup.js';
 import type { GameDefinition } from '../lib/registry/types.js';
 import type { Env } from '../env.js';
@@ -83,6 +85,30 @@ export type StopWorkflowOutcome =
     };
 
 export async function runStopWorkflow(
+  env: Env,
+  game: GameDefinition,
+  opts: RunStopWorkflowOptions,
+): Promise<StopWorkflowOutcome> {
+  const outcome = await executeStopWorkflow(env, game, opts);
+
+  // Phase 4 Step 2: Discord 経由以外の発火 (sidecar / cron-fallback) は Discord channel に
+  // webhook 通知を出す。Discord 経由は元 interaction の follow-up edit が既に出るので不要。
+  // 通知失敗は本フローを止めない (postDiscordWebhookMessage 自体も throw しない契約)。
+  if (opts.triggeredBy !== 'discord') {
+    const embed = buildIdleStopNotification(game, outcome, opts.triggeredBy);
+    if (embed !== undefined) {
+      try {
+        await postDiscordWebhookMessage(env, { embeds: [embed] });
+      } catch (err) {
+        console.error('idle-stop notification post threw:', err);
+      }
+    }
+  }
+
+  return outcome;
+}
+
+async function executeStopWorkflow(
   env: Env,
   game: GameDefinition,
   opts: RunStopWorkflowOptions,
