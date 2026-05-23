@@ -1,6 +1,6 @@
 # Phase 4 実装計画 — 通知拡張 (idle 停止 / Spot 中断 / snapshot 失敗)
 
-最終更新: 2026-05-24 (Step 4 完了 — snapshot 削除失敗通知 + notif-suppress 連投抑制、88/88 通過)
+最終更新: 2026-05-24 (Phase 4 完了 — Step 1〜6 全部 done、A/B/C 実機検証も通過)
 
 ## このドキュメントについて
 
@@ -137,31 +137,31 @@ DeleteSnapshot / DeleteVolume が失敗したとき、Discord に warning 通知
 
 Worker コード変更: **あり**。
 
-### Step 5: 実機検証  *(未着手)*
+### Step 5: 実機検証  *(完了 2026-05-24)*
 
-A / B / C をユーザーが手元で確認する。runbook 化する。
+A / B / C をユーザーが手元で確認。詳細は `docs/runbook-phase4-notifications.md` §確認まとめ。
 
-- [ ] **A**: `/start atm11` → 10 分放置 → idle 停止 → Discord channel に 📴 投稿
-- [ ] **B**: `aws ec2 send-spot-instance-interruption --instance-ids <i-...>` → Discord channel に 🚨 critical embed
-- [ ] **C**: 意図的に snapshot 失敗を起こすのは難しいので、unit test + code review で済ます。実機でフェイク失敗を起こすコマンド (例: 一時的に snapshot id を invalid に書き換える) は runbook に手順だけ示す
-- [ ] runbook (`docs/runbook-phase4-notifications.md` 新規 or `runbook-phase3-sidecar.md` に追記) で 3 つの実機テスト手順を整備
+- [x] **A**: `/start atm11` → 10 分放置 → idle 停止 → Discord channel に 📴 投稿 (実機 OK)
+- [x] **B**: B1 (SNS publish) で擬似発火 → Discord channel に 🚨 critical embed (実機 OK)
+- [x] **C**: unit test + code review で代替 (`notif-suppress.test.ts` + `notifications.test.ts` の cron 失敗 embed 6 ケース)。意図的失敗の発火コマンドは runbook 内に手順示唆
+- [x] runbook (`docs/runbook-phase4-notifications.md`) 整備済。B は誤情報 `aws ec2 send-spot-instance-interruption` を運用中に踏み、SNS 直接 publish + AWS FIS (ec2-spot-interrupter) の 2 択に修正
 
-### Step 6: ドキュメント更新 + Phase 4 完了マーク  *(未着手)*
+### Step 6: ドキュメント更新 + Phase 4 完了マーク  *(完了 2026-05-24)*
 
-- [ ] `design.md` §10 Phase 4 の checkbox を埋め、完了マーク
-- [ ] `phase3-plan.md` の「持ち越し」 idle 通知を「Phase 4 で実装済」に修正
-- [ ] `phase4-plan.md` の各 Step を完了マーク
-- [ ] (memory) Phase 4 完了 / Phase 5 (OIDC) 着手を `phase-roadmap-2026-05-23.md` に反映
+- [x] `design.md` §10 Phase 4 の checkbox を埋め、完了マーク (rev 6 に bump)
+- [x] `phase3-plan.md` の「Phase 4 で扱わないもの」idle 通知記述は当時の状況のため変更なし (Step 2 で実装済の事実は phase4-plan.md 側で明示)
+- [x] `phase4-plan.md` の各 Step を完了マーク
+- [x] (memory) Phase 4 完了 / Phase 5 (OIDC) 着手を `phase-roadmap-2026-05-23.md` に反映
 
 ---
 
 ## 完了基準
 
-- [ ] ATM11 で idle 停止後 1 分以内に Discord channel に `📴` で停止通知が届く (Step 2 + 5 実機)
-- [ ] Spot 中断シミュレーションで Discord channel に `🚨` critical 通知が届く (Step 3 + 5 実機)
-- [ ] snapshot 削除失敗を含む Worker Cron 失敗が Discord に届く (Step 4、unit test 中心 + runbook 手順)
-- [ ] 既存の Budget アラート / SNS subscription confirmation / SNS Spot 中断などが回帰せず動く (Step 1 リファクタの副作用確認)
-- [ ] design.md §10 Phase 4 の項目すべて達成 (D/E/F は持ち越しと明記)
+- [x] ATM11 で idle 停止後 1 分以内に Discord channel に `📴` で停止通知が届く (Step 2 + 5 実機)
+- [x] Spot 中断シミュレーションで Discord channel に `🚨` critical 通知が届く (Step 3 + 5 実機、B1 経路)
+- [x] snapshot 削除失敗を含む Worker Cron 失敗が Discord に届く (Step 4、unit test 中心 + runbook 手順)
+- [x] 既存の Budget アラート / SNS subscription confirmation / SNS Spot 中断などが回帰せず動く (Step 1 リファクタの副作用確認)
+- [x] design.md §10 Phase 4 の項目すべて達成 (D/E/F は持ち越しと明記)
 
 ## Phase 4 で扱わないもの (持ち越し)
 

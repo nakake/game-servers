@@ -161,11 +161,11 @@ Step 4 で詳細手順を本書に追記する。
 
 ## 確認まとめ
 
-| 項目 | 確認方法 | 合否 |
+| 項目 | 確認方法 | 合否 (2026-05-24) |
 |---|---|---|
-| A. idle 停止 → 📴 embed | sidecar 経路で 10 分放置 → Discord channel 観察 | (記入) |
-| B. Spot 中断 → 🚨 embed | `send-spot-instance-interruption` 発火 → Discord channel 観察 | (記入) |
-| C. snapshot 失敗 → ⚠️ embed | unit test + コードレビューで代替 (Step 4) | (記入) |
-| 既存 Budget アラートが回帰せず動く | `inferSeverity` warning 判定 + embed 投稿 | (記入) |
+| A. idle 停止 → 📴 embed | sidecar 経路で 10 分放置 → Discord channel 観察 | ✅ OK |
+| B. Spot 中断 → 🚨 embed | B1 (SNS publish) → Discord channel 観察 | ✅ OK |
+| C. snapshot 失敗 → ⚠️ embed | unit test + コードレビューで代替 (実機での意図的失敗発火は困難) | ✅ OK |
+| 既存 Budget アラートが回帰せず動く | `inferSeverity` warning 判定 + embed 投稿 (Step 1 リファクタの副作用確認) | ✅ OK |
 
-確認完了後、`docs/phase4-plan.md` §完了基準のチェックボックスを更新する。
+Phase 4 完了。次は Phase 5 (OIDC 化) — `docs/design.md` §10 / `docs/phase-roadmap` memory 参照。

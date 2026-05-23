@@ -1,6 +1,6 @@
 # Game Servers — 設計ドキュメント
 
-最終更新: 2026-05-23 (rev 5: Phase 3 完了。sidecar + idle 自動停止 + Cron フォールバックが本番稼働、ATM11 で全経路実機検証済)
+最終更新: 2026-05-24 (rev 6: Phase 4 完了。idle 停止 / Spot 中断 / cron 失敗の Discord 集約通知が本番稼働。公開前残るは Phase 5 OIDC のみ)
 
 ## 1. 目的とスコープ
 
@@ -643,16 +643,17 @@ F:/project/game_servers/
 
 ゴール: 放置で勝手に停止する。**達成** — ATM11 で 10 分 idle → 自動 snapshot + terminate、world 永続性 + Discord `/stop` 回帰すべて実機確認済 (`docs/phase3-plan.md` §完了基準、`docs/runbook-phase3-sidecar.md` §Step 6)。Cron フォールバックの **発火そのもの** だけ実機未検証だが、`idle-fallback.test.ts` の unit test でロジックは固めてあり、skip 経路 (`within-window`) は実機ログで確認済。
 
-### Phase 4: 通知拡張 (1〜2 日) — **公開前必須**
+### Phase 4: 通知拡張 — 完了 (2026-05-24)
 
-Terraform 化 / Packer / GitHub Actions の項目は IaC migration (`docs/iac-migration-plan.md`) で完了済。本 Phase は **AWS 通知の Discord 集約強化** に絞る。
+Terraform 化 / Packer / GitHub Actions の項目は IaC migration (`docs/iac-migration-plan.md`) で完了済。本 Phase は **AWS 通知の Discord 集約強化** に絞った (詳細 `docs/phase4-plan.md`)。
 
-- [ ] EventBridge ルール追加 (Spot 中断警告) → SNS → Discord (IaC migration Step 7 で EventBridge → SNS は配線済、Discord 整形を充実)
-- [ ] Worker Cron の snapshot 世代管理失敗通知 → SNS → Discord
-- [ ] CloudTrail → EventBridge で IAM ログイン異常検知 → Discord (任意)
-- [ ] 週次バックアップ完了通知 (info レベル、Phase 3 の sidecar/snapshot 完了 webhook と統合)
+- [x] EventBridge ルール (Spot 中断警告) → SNS → Discord の専用整形 (`isSpotInterruptionMessage` + `buildSpotInterruptionEmbed`、generic 整形だと title が "AWS notification" になり一目で内容が分からない問題を解消)
+- [x] sidecar / cron-fallback idle 停止通知 → Discord (`buildIdleStopNotification`、Discord `/stop` の二重通知は元 interaction の follow-up edit で抑止)
+- [x] Worker Cron snapshot 世代管理 / volume cleanup の失敗通知 → Discord (`notif-suppress` で 1 時間 1 回まで)
+- [-] CloudTrail → EventBridge で IAM ログイン異常検知 → Discord (持ち越し、運用しながら必要なら追加)
+- [-] 週次バックアップ完了通知 (バックアップ自体が未実装、別 Phase で実装と同時に)
 
-ゴール: 公開後のオペレーション可視性。AWS の異常が **Discord に必ず届く**。
+ゴール: **達成** — ATM11 の idle 停止 / Spot 中断 (B1 SNS 直接 publish) / 既存 Budget アラートの回帰、すべて実機検証済 (`docs/runbook-phase4-notifications.md` §確認まとめ)。snapshot 失敗通知は実機での意図的失敗発火が困難なため unit test + コードレビューで担保 (`notif-suppress.test.ts` + `notifications.test.ts` の cron 失敗 embed 6 ケース)。
 
 ### Phase 5: OIDC 化 (1 日) — **公開前推奨**
 
