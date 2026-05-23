@@ -252,20 +252,17 @@ async function executeStart(
 
     // ready 通知 (SNS 経由) が後からこの元メッセージを ✅ に編集し、起動した人を mention
     // できるよう、interaction の文脈を KV に保存する。
-    // SERVER_STATE が未バインドなら skip → ready 通知は webhook のみ (編集 / mention なし)。
-    if (env.SERVER_STATE !== undefined) {
-      const userId = interaction.member?.user?.id ?? interaction.user?.id;
-      await storePendingReady(env.SERVER_STATE, {
-        applicationId: env.DISCORD_APPLICATION_ID,
-        interactionToken: interaction.token,
-        gameId,
-        fqdn,
-        port,
-        startedAt: new Date().toISOString(),
-        ...(userId !== undefined ? { userId } : {}),
-        ...(interaction.channel_id !== undefined ? { channelId: interaction.channel_id } : {}),
-      }).catch((err) => console.error('storePendingReady failed:', err));
-    }
+    const userId = interaction.member?.user?.id ?? interaction.user?.id;
+    await storePendingReady(env.SERVER_STATE, {
+      applicationId: env.DISCORD_APPLICATION_ID,
+      interactionToken: interaction.token,
+      gameId,
+      fqdn,
+      port,
+      startedAt: new Date().toISOString(),
+      ...(userId !== undefined ? { userId } : {}),
+      ...(interaction.channel_id !== undefined ? { channelId: interaction.channel_id } : {}),
+    }).catch((err) => console.error('storePendingReady failed:', err));
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     await safeEdit(followUp, `❌ \`/start ${gameId}\` failed: ${msg.slice(0, 500)}`);

@@ -21,11 +21,6 @@ import type { Env } from '../env.js';
 
 export async function handleVolumeCleanup(env: Env): Promise<void> {
   const kv = env.SERVER_STATE;
-  if (kv === undefined) {
-    console.warn('volume cleanup: SERVER_STATE KV unbound — skip');
-    return;
-  }
-
   const pending = await listPendingCleanups(kv);
   if (pending.length === 0) return;
 

@@ -147,11 +147,9 @@ async function deliverGameReady(gameId: string, env: Env): Promise<void> {
     `✅ ${game.display_name}: ${game.discord.ready_message}\n` +
     `\`${fqdn}:${port}\` で接続できます`;
 
-  const pending = env.SERVER_STATE !== undefined
-    ? await getPendingReady(env.SERVER_STATE, gameId).catch(() => undefined)
-    : undefined;
+  const pending = await getPendingReady(env.SERVER_STATE, gameId).catch(() => undefined);
 
-  // KV に文脈が無い (SERVER_STATE 未バインド / TTL 切れ) → mention 無しで webhook 投稿のみ。
+  // KV に文脈が無い (TTL 切れ / 同 game の /start を打っていない) → mention 無しで webhook のみ。
   if (pending === undefined) {
     await postWebhookMessage(env, announcement, undefined);
     return;
@@ -188,9 +186,7 @@ async function deliverGameReady(gameId: string, env: Env): Promise<void> {
   }
 
   // 配信できたら KV を消す (SNS 再送による二重通知を防ぐ)。
-  if (env.SERVER_STATE !== undefined) {
-    await deletePendingReady(env.SERVER_STATE, gameId).catch(() => undefined);
-  }
+  await deletePendingReady(env.SERVER_STATE, gameId).catch(() => undefined);
 }
 
 // channel webhook へ plain メッセージを投稿する。

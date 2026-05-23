@@ -59,4 +59,6 @@ crons = ["*/5 * * * *"]
 #   - AWS_ACCESS_KEY_ID
 #   - AWS_SECRET_ACCESS_KEY
 #   - CLOUDFLARE_DNS_API_TOKEN
-#   - SIDECAR_HMAC_SECRET
+#   - SIDECAR_HMAC_SECRETS    Phase 3: sidecar 認証用 game→secret の JSON map
+#                             例: {"atm11":"<base64 secret>"}
+#                             sidecar 側は SSM /gs/<game>/sidecar_hmac_secret を読む
