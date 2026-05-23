@@ -7,6 +7,9 @@ import { handleAdminDockerStop } from './handlers/admin.js';
 import { handleAwsNotification } from './handlers/aws-notification.js';
 import { handleVolumeCleanup } from './handlers/cleanup.js';
 import { handleDiscordInteraction } from './handlers/discord.js';
+import { handleSidecarHeartbeat } from './handlers/sidecar/heartbeat.js';
+import { handleSidecarIdleDetected } from './handlers/sidecar/idle-detected.js';
+import { handleSidecarRegistry } from './handlers/sidecar/registry.js';
 import { handleSnapshotRetention } from './handlers/snapshot-retention.js';
 import type { Env } from './env.js';
 
@@ -37,6 +40,18 @@ export default {
 
     if (request.method === 'POST' && url.pathname === '/aws/notification') {
       return handleAwsNotification(request, env, ctx);
+    }
+
+    // /sidecar/* — sidecar (EC2 内) と Worker の HMAC 認証付きエンドポイント (Phase 3)。
+    // CORS / Discord 署名は不要 (HMAC 認証で守られる)。
+    if (request.method === 'POST' && url.pathname === '/sidecar/heartbeat') {
+      return handleSidecarHeartbeat(request, env);
+    }
+    if (request.method === 'POST' && url.pathname === '/sidecar/idle-detected') {
+      return handleSidecarIdleDetected(request, env, ctx);
+    }
+    if (request.method === 'GET' && url.pathname === '/sidecar/registry') {
+      return handleSidecarRegistry(request, env);
     }
 
     if (request.method === 'POST' && url.pathname === '/admin/docker-stop') {

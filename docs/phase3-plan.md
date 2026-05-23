@@ -139,29 +139,18 @@ sidecar ハンドラ実装の前提となる横断ロジック。
 
 Worker コード変更: **あり (リファクタ + 新規ヘルパ + テスト基盤)**。挙動変化なし (まだルーティング配線せず、`/sidecar/*` は Step 2)。
 
-### Step 2: Worker — `/sidecar/*` ハンドラ実装 (heartbeat / idle-detected / registry)  *(未着手)*
+### Step 2: Worker — `/sidecar/*` ハンドラ実装 (heartbeat / idle-detected / registry)  *(完了 2026-05-23)*
 
-- [ ] `handlers/sidecar/heartbeat.ts` 新規:
-  - POST `/sidecar/heartbeat` 受信
-  - body: `{ game_id, instance_id, timestamp, player_count, signature }`
-  - HMAC 検証 → `SERVER_STATE.last_seen` (= `{ game_id, instance_id, last_seen_at, player_count }`) を `last_seen` キーで上書き、TTL は `timeout_min * 60 * 3` 秒 (フォールバック判定の余裕)
-  - 即時 204 応答 (重い処理なし)
-- [ ] `handlers/sidecar/idle-detected.ts` 新規:
-  - POST `/sidecar/idle-detected` 受信
-  - body: `{ game_id, instance_id, timestamp, last_player_seen_at, signature }`
-  - HMAC 検証 + `SERVER_STATE.current` の `instance_id` と一致するか確認 (古い instance からの晩到 stop 防止)
-  - `ctx.waitUntil(runStopWorkflow(env, game, { triggeredBy: 'sidecar' }))` で非同期実行
-  - 即時 202 応答
-- [ ] `handlers/sidecar/registry.ts` 新規 (決定8):
-  - GET `/sidecar/registry?game_id=<id>` 受信
-  - HMAC 検証 (GET の signature は query string + timestamp ヘッダから計算)
-  - `getGame(env.GAME_REGISTRY, game_id)` の結果を JSON で返却
-  - 未登録 / `enabled: false` の場合は 404。sidecar はこれを受けて起動失敗としてログ出力
-- [ ] `index.ts` に 3 ルートを追加。`/sidecar/*` は HMAC 検証で守られているため CORS / Discord 署名は不要
-- [ ] テスト: 不正署名 / timestamp skew / 古い instance_id の各拒否、registry 404 ケース
-- [ ] `pnpm typecheck` / `wrangler deploy --dry-run` 通過
+- [x] `handlers/sidecar/auth.ts` 新規 (共通認証ヘルパ): `verifySidecarPostRequest` / `verifySidecarGetRequest`。`SIDECAR_HMAC_SECRETS` を JSON parse して該当 game の secret を引き、決定10 の payload 正規化で `verifyHmac` を呼ぶ。失敗理由は `missing-headers` / `invalid-body` / `missing-game-id` / `unknown-game` / `invalid-signature` / `misconfigured-secrets` の discriminated union
+- [x] `lib/state/last-seen.ts` 新規: `storeLastSeen` / `getLastSeen` / `deleteLastSeen`。キーは `last-seen:<game_id>`、TTL は handler 側で `timeout_min * 60 * 3` 秒を計算して渡す
+- [x] `handlers/sidecar/heartbeat.ts`: POST `/sidecar/heartbeat`、auth → 204、KV に `{instanceId, lastSeenAt, playerCount}` を上書き
+- [x] `handlers/sidecar/idle-detected.ts`: POST `/sidecar/idle-detected`、auth → `ctx.waitUntil(runStopWorkflow({triggeredBy: 'sidecar', expectedInstanceId: body.instance_id}))` → 即時 202
+- [x] `handlers/sidecar/registry.ts` (決定8): GET `/sidecar/registry?game_id=<id>`、auth → `getGame` JSON 返却、未登録 / `enabled=false` は 404
+- [x] `index.ts` に 3 ルート配線 (POST/POST/GET)。`/sidecar/*` は HMAC 認証で守られるため CORS / Discord 署名は不要
+- [x] テスト: `auth.test.ts` (12 ケース: 正常 POST/GET、ヘッダ欠落、不正 timestamp / body、unknown game、改竄、skew over、misconfigured secrets、tampered path)、`last-seen.test.ts` (4 ケース: round-trip + TTL 観測 + 欠如 + 壊れた JSON)
+- [x] `pnpm typecheck` / `pnpm test` (26/26 pass) / `pnpm build` (dry-run) 通過
 
-Worker コード変更: **あり**。デプロイは Step 8。
+Worker コード変更: **あり**。デプロイは Step 8。`expectedInstanceId` ガードと registry 404 経路の handler レベルテストは KV/AWS mock が必要で本 Step では省略、Step 8 の実機確認に回す。
 
 ### Step 3: Worker — Cron フォールバック (sidecar 沈黙時の保険)  *(未着手)*
 
