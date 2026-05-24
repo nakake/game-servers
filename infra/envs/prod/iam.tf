@@ -265,13 +265,29 @@ data "aws_iam_policy_document" "gs_worker_oidc" {
   }
 
   # ---- EC2 RunInstances (cryptojacking 抑止の核) ----
-  # RunInstances は複数 resource (instance / volume / network-interface / etc.) に作用するため
-  # Resource = "*" のまま、condition で LT + InstanceType + RequestTag/Env を縛る。
+  # RunInstances は複数 resource type に対して評価される (instance / volume / key-pair /
+  # security-group / subnet / network-interface / launch-template / image)。
+  #
+  # 当初は Resource = "*" + StringEqualsIfExists(aws:RequestTag/Env) で全 resource を 1 statement
+  # に統合する設計を試みたが、AWS の実装では non-taggable resource (key-pair 等) に対しては
+  # Resource = "*" の wildcard 自体が match せず、`UnauthorizedOperation: no identity-based
+  # policy allows ec2:RunInstances on resource: arn:aws:ec2:...:key-pair/...` が発生する。
+  # simulate-principal-policy でも同じ挙動を再現 (本番 ATM11 /start で 2026-05-24 観測)。
+  #
+  # 対処: resource type を taggable / non-taggable で 2 statement に分割する:
+  #   - Ec2RunInstancesTaggable    : instance / volume を Resource として明示、Env=prod tag 必須
+  #   - Ec2RunInstancesNonTaggable : key-pair / security-group / subnet / network-interface /
+  #                                  launch-template / image を Resource として明示、tag 条件無し
+  # どちらの statement にも LaunchTemplate + InstanceType condition があるので、攻撃者が任意
+  # LT / 任意 type で起動できない = cryptojacking 抑止は維持。
   statement {
-    sid       = "Ec2RunInstances"
+    sid       = "Ec2RunInstancesTaggable"
     effect    = "Allow"
     actions   = ["ec2:RunInstances"]
-    resources = ["*"]
+    resources = [
+      "arn:aws:ec2:${var.aws_region}:${data.aws_caller_identity.current.account_id}:instance/*",
+      "arn:aws:ec2:${var.aws_region}:${data.aws_caller_identity.current.account_id}:volume/*",
+    ]
 
     condition {
       test     = "ArnEquals"
@@ -292,6 +308,36 @@ data "aws_iam_policy_document" "gs_worker_oidc" {
       variable = "aws:RequestTag/Env"
       values   = ["prod"]
     }
+  }
+
+  statement {
+    sid       = "Ec2RunInstancesNonTaggable"
+    effect    = "Allow"
+    actions   = ["ec2:RunInstances"]
+    resources = [
+      "arn:aws:ec2:${var.aws_region}:${data.aws_caller_identity.current.account_id}:key-pair/*",
+      "arn:aws:ec2:${var.aws_region}:${data.aws_caller_identity.current.account_id}:security-group/*",
+      "arn:aws:ec2:${var.aws_region}:${data.aws_caller_identity.current.account_id}:subnet/*",
+      "arn:aws:ec2:${var.aws_region}:${data.aws_caller_identity.current.account_id}:network-interface/*",
+      "arn:aws:ec2:${var.aws_region}:${data.aws_caller_identity.current.account_id}:launch-template/*",
+      # image (AMI) は AWS のアカウントレス resource (Amazon 提供 / 共有 AMI 含む)
+      "arn:aws:ec2:${var.aws_region}::image/*",
+    ]
+
+    condition {
+      test     = "ArnEquals"
+      variable = "ec2:LaunchTemplate"
+      values   = [aws_launch_template.game_server.arn]
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "ec2:InstanceType"
+      values   = var.worker_oidc_allowed_instance_types
+    }
+    # RequestTag/Env 条件は付けない。これらの resource type は RunInstances request の
+    # context に request tag を持たない (non-taggable または「使われるだけ」の resource)。
+    # 攻撃者の cryptojacking 抑止は LaunchTemplate + InstanceType condition で担保される。
   }
 
   # ---- EC2 TerminateInstances ----
