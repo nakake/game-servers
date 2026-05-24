@@ -54,3 +54,19 @@ variable "worker_oidc_sub" {
   type        = string
   sensitive   = true
 }
+
+variable "worker_oidc_allowed_instance_types" {
+  description = "新 gs-worker-oidc-policy の ec2:RunInstances が許可する instance type list。registry.json `instance_types[]` 全種をここに登録すること (= 新ゲーム追加で type を増やしたら本 var にも追記して terraform apply 必要)。cryptojacking 抑止の核なので最小権限で運用"
+  type        = list(string)
+  default = [
+    # ATM11 (games/atm11/registry.json:instance_types)
+    "r7a.large",
+    "r6a.large",
+    "m7a.xlarge",
+  ]
+
+  validation {
+    condition     = length(var.worker_oidc_allowed_instance_types) > 0 && length(var.worker_oidc_allowed_instance_types) <= 10
+    error_message = "worker_oidc_allowed_instance_types must contain 1 to 10 instance types (cryptojacking 抑止のため過剰な拡大を防ぐ)"
+  }
+}

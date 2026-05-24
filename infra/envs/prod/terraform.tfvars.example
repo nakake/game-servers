@@ -29,3 +29,12 @@ worker_oidc_thumbprints = [
 #
 # Workers Secret `OIDC_SUB` と完全一致必須。漏洩疑い時は "REVOKED-<timestamp>" 等の
 # 到達不能値で apply 1 回 → 新値で再 apply (docs/phase5-plan.md Step 8 緊急 rotation 方式 A)。
+
+# 新 gs-worker-oidc-policy (Step 2.5.1) の RunInstances が許可する instance type list。
+# registry.json `instance_types[]` 全種を網羅する必要がある (= 新ゲーム追加時にここを
+# 増やして terraform apply)。default は ATM11 用の 3 個。
+# worker_oidc_allowed_instance_types = [
+#   "r7a.large",
+#   "r6a.large",
+#   "m7a.xlarge",
+# ]

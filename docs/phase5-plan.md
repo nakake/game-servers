@@ -276,15 +276,19 @@ Worker コード変更: なし (rev5 で thumbprint cron 廃止、Step 3 の sen
     - **`PassEc2InstanceRole`**: 既存 `iam:PassedToService = "ec2.amazonaws.com"` 条件を **新 policy で必ず継承** (見落とすと EC2 以外への PassRole が通る)。Resource は `aws_iam_role.gs_phase0_ec2.arn` で既存通り絞り込み
     - `SsmAmiResolve`: 既存
     - **`OidcThumbprintRead`** (新規): rev5 で **削除確定**。oidc-thumbprint-check cron 自体を廃止したため `iam:GetOpenIDConnectProvider` 権限は不要。手動 thumbprint check (runbook Step 8) はユーザーの AWS CLI 権限で実行する
-- [ ] **新 `aws_iam_policy` "gs_worker_oidc_policy"** + `aws_iam_role_policy_attachment` で Step 2 の Role に attach
-- [ ] **terraform plan**: 「Policy 1 個 + Attachment 1 個 追加」、既存 user 側 policy は無変更
-- [ ] **terraform apply** (ユーザー実行)
-- [ ] **AWS CLI 検証**: Step 2 で発行した一時 credentials で以下を試行:
-  - `ec2 run-instances` を **異なる LT ARN** で → AccessDenied であること
-  - `ec2 run-instances` を **未許可 instance type** で → AccessDenied
-  - `ec2 run-instances` を **正規 LT + 許可 type** で → 成功 (起動後 terminate)
-  - `ec2 terminate-instances` を **無 tag instance** で → AccessDenied
-- [ ] **回帰確認**: Phase 1〜4 の挙動が新 policy で壊れていないこと (Step 5 の staging で改めて検証)
+- [x] **新 `aws_iam_policy` "gs_worker_oidc_policy"** + `aws_iam_role_policy_attachment` で Step 2 の Role に attach (2026-05-24 commit)
+- [x] **terraform plan** (2026-05-24): `Plan: 2 to add, 0 to change, 0 to destroy.` を確認。policy 1 個 + attachment 1 個 追加、既存 user 側 policy 無変更
+- [x] **terraform apply** (ユーザー実行、2026-05-24): policy + attachment 作成成功 (`arn:aws:iam::123456789012:policy/gs-worker-oidc-policy`)
+- [x] **AWS CLI 検証** (2026-05-24): 実 API 副作用ゼロの `aws iam simulate-principal-policy` で 8 ケース確認 (`gs-worker-oidc-role` 直接評価):
+  - 未許可 LT で `ec2:RunInstances` → **implicitDeny** ✅
+  - 未許可 instance type (`c5.24xlarge`) で `ec2:RunInstances` → **implicitDeny** ✅
+  - 正規 LT + 許可 type + RequestTag/Env=prod で `ec2:RunInstances` → **allowed** (Matched: gs-worker-oidc-policy) ✅
+  - 無 tag instance で `ec2:TerminateInstances` → **implicitDeny** ✅
+  - 正規 tag (Project+Env) で `ec2:TerminateInstances` → **allowed** ✅
+  - SnapshotType=game-world-data tag が無い AMI snapshot で `ec2:DeleteSnapshot` → **implicitDeny** ✅ (Packer snap 構造的保護を実証)
+  - SnapshotType=game-world-data tag 付き snapshot で `ec2:DeleteSnapshot` → **allowed** ✅
+  - 非許可 action (`AssociateAddress`) 経由で `ec2:CreateTags` → **implicitDeny** ✅ (`ec2:CreateAction` 制約で tag 偽装 bypass を遮断)
+- [ ] **回帰確認**: Phase 1〜4 の挙動が新 policy で壊れていないこと (Step 5 の staging で改めて検証)。**現時点では Worker は依然 static credentials (旧 gs-worker-caller user) を使用するため Step 6 cutover まで本番挙動は無変更**、policy attach 単独では既存経路に影響しない
 
 Worker コード変更: なし。Infra 変更: **あり**。
 
