@@ -152,16 +152,28 @@ export async function describeVolumesByTag(
 }
 
 // volume を id 指定で 1 件取得する。存在しなければ undefined。
+// AWS は「存在しない / 既に削除済」を InvalidVolume.NotFound エラーとして返すため
+// (空 result 配列ではなく)、この関数で吸収して契約通り undefined を返す。これにより
+// 呼び出し側 (cleanup.ts) は describeSnapshotById と同じ「undefined チェックで OK」
+// パターンで書ける (cleanup.ts:74-78 が undefined → entry 削除する分岐に乗る)。
 export async function describeVolumeById(
   client: AwsApiClient,
   volumeId: string,
 ): Promise<VolumeDetail | undefined> {
-  const xml = await client.queryRequest({
-    service: 'ec2',
-    action: 'DescribeVolumes',
-    version: EC2_API_VERSION,
-    params: { 'VolumeId.1': volumeId },
-  });
+  let xml: string;
+  try {
+    xml = await client.queryRequest({
+      service: 'ec2',
+      action: 'DescribeVolumes',
+      version: EC2_API_VERSION,
+      params: { 'VolumeId.1': volumeId },
+    });
+  } catch (err) {
+    if (err instanceof AwsApiError && err.awsErrorCode === 'InvalidVolume.NotFound') {
+      return undefined;
+    }
+    throw err;
+  }
   const parsed = xmlParser.parse(xml) as RawDescribeVolumesResponse;
   const item = (parsed.DescribeVolumesResponse.volumeSet?.item ?? [])[0];
   return item !== undefined ? rawVolumeToDetail(item) : undefined;
