@@ -81,8 +81,6 @@ pnpm --filter discord-handler test    # Worker ユニットテスト
 
 [MIT License](LICENSE)
 
-ゲームの world データや Discord bot の認証情報はリポジトリに含まれていないため、fork して自分の AWS / Discord App にデプロイしても本リポジトリ運営者の本番には一切影響しません。
-
 ---
 
 このプロジェクトは [Claude Code](https://claude.com/claude-code) (Anthropic) の支援を受けて開発しました。
