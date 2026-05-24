@@ -301,10 +301,23 @@ data "aws_iam_policy_document" "gs_worker_oidc" {
       values   = var.worker_oidc_allowed_instance_types
     }
 
-    # 起動時に Env=prod tag を必ず付ける契約。start.ts の instanceTags / volumeTags が
-    # Env=prod を渡しているため satisfy できる (Step 2.5.0 で対応済)。
+    # 起動時に Env=prod tag を強制する条件。
+    #
+    # IfExists を使う理由: AWS の policy evaluator は `aws:RequestTag/Env` を
+    # **instance resource の evaluation context にしか attach しない** (実 RunInstances
+    # API で 2026-05-24 観測。Worker は volumeTags=[Env=prod] を正しく送っているにも関わらず
+    # volume context には request tag が現れず、StringEquals が null 比較で fail → deny)。
+    # IfExists で「context に tag があれば match、無ければ skip」にすることで volume の
+    # evaluation を pass させる。
+    #
+    # Env=prod 強制の構造的担保は本 condition 単独ではなく多層防御で維持:
+    #   1. LT (gs-game-server) の tag_specifications で instance/volume に必ず Env=prod 焼き付け
+    #   2. Worker (start.ts) は instanceTags/volumeTags の双方で Env=prod を冗長指定
+    #   3. ec2:CreateTags statement で aws:RequestTag/Project=game-servers + ec2:CreateAction を限定
+    #      (= 単独 CreateTags での Env tag 偽装を遮断)
+    # この 3 層により attacker が credentials 漏洩しても Env=prod 無し instance/volume は作れない。
     condition {
-      test     = "StringEquals"
+      test     = "StringEqualsIfExists"
       variable = "aws:RequestTag/Env"
       values   = ["prod"]
     }
