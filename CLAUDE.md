@@ -35,7 +35,9 @@ Discord コマンドから起動・停止できる、複数ゲーム対応の Sp
 ### 秘密情報
 
 **絶対にコミットしてはいけないもの**:
-- AWS Access Key / Secret
+- ~~AWS Access Key / Secret~~ — Phase 5 (2026-05-24) で廃止済。Worker → AWS は OIDC AssumeRoleWithWebIdentity で 15min 短期 credentials のみ。新規 IAM user `gs-worker-caller` 系の長期キーは禁止
+- OIDC private key (Workers Secret `OIDC_PRIVATE_KEYS_JWK`、RSA-2048 JWK 配列)
+- OIDC sub claim 値 (Workers Secret `OIDC_SUB`)
 - Cloudflare API Token
 - Discord Bot Token / Public Key
 - RCON パスワード
