@@ -93,6 +93,8 @@ crash.log
 .vscode/
 !.vscode/extensions.json
 !.vscode/settings.shared.json
+# Claude Code のローカル作業ディレクトリ (将来 add される事故を防ぐ defensive ignore)
+.claude/
 *.swp
 *.swo
 *~
@@ -123,9 +125,6 @@ games/*/modpack-cache/
 *.tar.zst
 *.tar.gz
 !games/_template/**/*.tar.gz.example
-
-# Phase 0 検証で生成される計測結果
-docs/phase0-results.md
 
 # ============================================================
 # その他

@@ -29,7 +29,7 @@ variable "budget_warning_threshold_percent" {
 variable "admin_ssh_cidr" {
   description = "SSH (port 22) を許可する管理者の送信元 CIDR。ISP の IP 変更時はここを更新"
   type        = string
-  default     = "126.94.68.118/32"
+  default     = "203.0.113.1/32"
 }
 
 # ---- Phase 5: Worker OIDC (docs/phase5-plan.md Step 2) ----
