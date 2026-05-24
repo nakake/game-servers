@@ -383,19 +383,31 @@ data "aws_iam_policy_document" "gs_worker_oidc" {
   }
 
   statement {
-    sid       = "Ec2CreateSnapshotResource"
-    effect    = "Allow"
-    actions   = ["ec2:CreateSnapshot"]
-    resources = ["arn:aws:ec2:${var.aws_region}:${data.aws_caller_identity.current.account_id}:snapshot/*"]
+    sid     = "Ec2CreateSnapshotResource"
+    effect  = "Allow"
+    actions = ["ec2:CreateSnapshot"]
+    # snapshot は account-less ARN format でも参照される (実 CreateSnapshot で
+    # arn:aws:ec2:ap-northeast-1::snapshot/* に対して deny を 2026-05-24 観測)。
+    # 両 format を allow しないと wildcard match しない。
+    resources = [
+      "arn:aws:ec2:${var.aws_region}::snapshot/*",
+      "arn:aws:ec2:${var.aws_region}:${data.aws_caller_identity.current.account_id}:snapshot/*",
+    ]
 
+    # IfExists を使う理由: RunInstances の volume と同じく、AWS は CreateSnapshot の
+    # snapshot resource evaluation context に aws:RequestTag/<key> を一貫して attach
+    # しないケースがある (実 API で deny を観測)。
+    # 攻撃面の閉鎖は Ec2CreateSnapshotOnVolume 側 (volume resource の ResourceTag check
+    # = Worker が tag を付けた game-servers / prod volume のみ snapshot 化可能) で
+    # 維持される = attacker が任意 volume を snapshot 化できない。
     condition {
-      test     = "StringEquals"
+      test     = "StringEqualsIfExists"
       variable = "aws:RequestTag/Project"
       values   = ["game-servers"]
     }
 
     condition {
-      test     = "StringEquals"
+      test     = "StringEqualsIfExists"
       variable = "aws:RequestTag/Env"
       values   = ["prod"]
     }
