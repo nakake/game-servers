@@ -1,8 +1,8 @@
 // credentials.ts のテスト。
 //
 // oidc-issuer (JWT 発行) と postDiscordWebhookMessage (通知) は module mock し、
-// KV と fetch だけ stub することで「OIDC 経路の挙動」と「static fallback の有無」を
-// 直接 assert する。
+// KV と fetch だけ stub することで OIDC 経路の挙動を直接 assert する。
+// 旧 static 経路 (AWS_AUTH_MODE 分岐 + IAM Access Key) は Step 7 で削除済。
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -65,10 +65,7 @@ function createKv({ putFails = false }: { putFails?: boolean } = {}): MockKv {
 function makeEnv(overrides: Partial<Env> & { kv?: MockKv } = {}): Env {
   const kv = overrides.kv ?? createKv();
   return {
-    AWS_AUTH_MODE: 'oidc',
     AWS_OIDC_ROLE_ARN: ROLE_ARN,
-    AWS_ACCESS_KEY_ID: 'AKIASTATIC',
-    AWS_SECRET_ACCESS_KEY: 'secretstatic',
     DISCORD_WEBHOOK_URL: 'https://discord.com/api/webhooks/test/x',
     SERVER_STATE: kv,
     ...overrides,
@@ -139,49 +136,12 @@ afterEach(() => {
 });
 
 // =============================================================================
-// 1. static mode
+// 1. oidc cache
 // =============================================================================
+// 旧 static 経路 (AWS_AUTH_MODE 分岐) のテストは Step 7 (2026-05-24) で削除済。
+// 現状は OIDC 専用 = AWS_AUTH_MODE / AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY を持たない。
 
-describe('getAwsCredentials — static mode (後方互換)', () => {
-  it('AWS_AUTH_MODE 未設定 → static credentials を即 return、KV / STS / JWT を一切呼ばない', async () => {
-    const fetchMock = vi.fn();
-    vi.stubGlobal('fetch', fetchMock);
-    const kv = createKv();
-    // makeEnv の default は 'oidc'。base env を作って AWS_AUTH_MODE プロパティだけ delete することで
-    // exactOptionalPropertyTypes 配下でも「未設定」を表現する。
-    const env = makeEnv({ kv });
-    delete (env as { AWS_AUTH_MODE?: 'static' | 'oidc' }).AWS_AUTH_MODE;
-    const { ctx, settled } = makeCtx();
-
-    const creds = await getAwsCredentials(env, ctx);
-    await settled();
-
-    expect(creds).toEqual({
-      accessKeyId: 'AKIASTATIC',
-      secretAccessKey: 'secretstatic',
-    });
-    expect(creds.sessionToken).toBeUndefined();
-    expect(fetchMock).not.toHaveBeenCalled();
-    expect(issueStsWebIdentityToken).not.toHaveBeenCalled();
-    expect(kv._store.size).toBe(0);
-  });
-
-  it('AWS_AUTH_MODE = "static" でも同じ static 経路を取る', async () => {
-    vi.stubGlobal('fetch', vi.fn());
-    const env = makeEnv({ AWS_AUTH_MODE: 'static' });
-    const { ctx, settled } = makeCtx();
-    const creds = await getAwsCredentials(env, ctx);
-    await settled();
-    expect(creds.accessKeyId).toBe('AKIASTATIC');
-    expect(issueStsWebIdentityToken).not.toHaveBeenCalled();
-  });
-});
-
-// =============================================================================
-// 2. oidc mode: cache hit
-// =============================================================================
-
-describe('getAwsCredentials — oidc mode cache', () => {
+describe('getAwsCredentials — oidc cache', () => {
   it('cache hit (expiration > now + 60s) で STS / JWT を呼ばずに即 return', async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
@@ -233,10 +193,10 @@ describe('getAwsCredentials — oidc mode cache', () => {
 });
 
 // =============================================================================
-// 3. oidc mode: STS 正常系
+// 2. STS 正常系
 // =============================================================================
 
-describe('getAwsCredentials — oidc mode STS 呼び出し', () => {
+describe('getAwsCredentials — STS 呼び出し', () => {
   it('cache miss → JWT 発行 → STS で credentials 取得 → KV put (TTL は負方向 jitter)', async () => {
     const expSec = Math.floor(Date.now() / 1000) + 900; // 15 分
     const expIso = new Date(expSec * 1000).toISOString();
@@ -288,10 +248,10 @@ describe('getAwsCredentials — oidc mode STS 呼び出し', () => {
 });
 
 // =============================================================================
-// 4. oidc mode: failure handling
+// 3. failure handling
 // =============================================================================
 
-describe('getAwsCredentials — oidc mode failure', () => {
+describe('getAwsCredentials — failure', () => {
   it('STS 4xx → OidcCredentialError throw、static credentials へ fallback しない (絶対)', async () => {
     const errorXml = stsXmlError(
       'AccessDenied',
@@ -317,7 +277,7 @@ describe('getAwsCredentials — oidc mode failure', () => {
     expect(content).not.toContain('arn:aws:iam');
   });
 
-  it('STS network 失敗 → NetworkError として throw + 通知、static fallback しない', async () => {
+  it('STS network 失敗 → NetworkError として throw + 通知', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn(async () => {
@@ -356,14 +316,8 @@ describe('getAwsCredentials — oidc mode failure', () => {
     expect(postDiscordWebhookMessage).toHaveBeenCalledTimes(1);
   });
 
-  it('AWS_OIDC_ROLE_ARN 未設定 → MissingRoleArn throw、JWT / STS は呼ばない', async () => {
-    const env = makeEnv();
-    delete (env as { AWS_OIDC_ROLE_ARN?: string }).AWS_OIDC_ROLE_ARN;
-    const { ctx, settled } = makeCtx();
-    await expect(getAwsCredentials(env, ctx)).rejects.toMatchObject({ code: 'MissingRoleArn' });
-    await settled();
-    expect(issueStsWebIdentityToken).not.toHaveBeenCalled();
-  });
+  // AWS_OIDC_ROLE_ARN 未設定の case は Step 7 で削除済 (env type で required string、
+  // empty string ガードも削除)。Worker 起動時の binding 不備は wrangler 側で弾かれる前提。
 
   it('KV put 失敗 → credentials は呼び出し側に return + Discord 通知 (silent degradation 防止)', async () => {
     const expIso = isoFromNow(900);

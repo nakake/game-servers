@@ -1,10 +1,10 @@
-// AWS credential provider (Phase 5 Step 3)。
+// AWS credential provider (Phase 5)。
 //
-// AWS_AUTH_MODE の値で経路を切り替える:
-//   - 'static' (default) → 旧 IAM Access Key を即 return (Phase 1〜4 経路、後方互換)
-//   - 'oidc'             → OIDC JWT で STS AssumeRoleWithWebIdentity → 15min credentials
+// Worker は AssumeRoleWithWebIdentity で 15min 短期 credentials を取得し、
+// 全 AWS API 呼び出し直前に getAwsCredentials(env, ctx) でこれを取る。
+// 旧 IAM Access Key 経路は Step 7 (2026-05-24) で完全削除済。
 //
-// OIDC 経路の動作 (docs/phase5-plan.md Step 3):
+// 動作 (docs/phase5-plan.md Step 3):
 //   1. in-flight Promise dedup (同 isolate 内の並列 5 呼び出しを 1 本化)
 //   2. KV `SERVER_STATE` `aws-creds:cache` 読み、`expiration > now + 60s` なら即 return
 //   3. miss → issueStsWebIdentityToken で JWT 発行 (sub/aud/ttl=60s が module-private で固定)
@@ -76,15 +76,9 @@ export async function getAwsCredentials(
   env: Env,
   ctx: ExecutionContext,
 ): Promise<AwsCredentials> {
-  if (env.AWS_AUTH_MODE !== 'oidc') {
-    // 後方互換: static 経路を即 return。KV / STS には触れない。
-    return {
-      accessKeyId: env.AWS_ACCESS_KEY_ID,
-      secretAccessKey: env.AWS_SECRET_ACCESS_KEY,
-    };
-  }
-
-  // oidc 経路: 単一 cache key を共有するため dedup key も固定。
+  // Phase 5 Step 7 (2026-05-24) で OIDC 専用化済。静的 IAM Access Key 経路は完全削除、
+  // AWS_AUTH_MODE 分岐も廃止 (env.ts から型ごと削除)。
+  // 単一 cache key を共有するため dedup key も固定。
   const dedupKey = 'sts';
   const existing = inflight.get(dedupKey);
   if (existing !== undefined) return existing;
@@ -111,11 +105,6 @@ async function fetchOidcCredentials(
   if (cached !== undefined) return toAwsCredentials(cached);
 
   // 2. cache miss → STS AssumeRoleWithWebIdentity
-  if (env.AWS_OIDC_ROLE_ARN === undefined || env.AWS_OIDC_ROLE_ARN === '') {
-    await notifyOidcFailure(env, ctx, 'MissingRoleArn', 0);
-    throw new OidcCredentialError('MissingRoleArn', 0);
-  }
-
   let token: string;
   try {
     token = await issueStsWebIdentityToken(env);

@@ -27,20 +27,13 @@ WORKER_PUBLIC_URL = "https://discord-handler.<your-account>.workers.dev"
 # ゲーム固有の値 (snapshot seed / cf_record_id / RCON SSM パス / launcher tarball) は
 # Phase 2 で registry.json (GAME_REGISTRY KV) に移管。ここには持たない。
 
-# ---- Phase 5: AWS OIDC (docs/phase5-plan.md Step 6) ----
+# ---- AWS OIDC (Phase 5、Step 7 で OIDC 専用化済) ----
 # AWS_OIDC_ROLE_ARN は Terraform output `worker_oidc_role_arn` の値 (Step 2 で apply 済)。
 # vars 配置で OK (漏れても sub/aud condition で守られる、phase5-plan.md 決定6)。
 AWS_OIDC_ROLE_ARN = "arn:aws:iam::123456789012:role/gs-worker-oidc-role"
-#
-# Phase 5 Step 6.A〜C リハーサル中: OIDC 経路を有効化。
 # Worker は AssumeRoleWithWebIdentity で 15min 短期 credentials を取得し、AWS API を叩く。
-# 旧 AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY secret は Step 7 (24h 観察後) で削除予定。
-#
-# 失敗時 rollback (Phase A〜C の途中で問題発生):
-#   1. 以下行を `# AWS_AUTH_MODE = "oidc"` にコメントアウト (or 行ごと削除)
-#   2. `pnpm wrangler deploy` で static 経路に即時復帰
-#   3. 旧 Access Key は Step 7 まで Inactive 化していないので静的経路がそのまま動く
-AWS_AUTH_MODE = "oidc"
+# 旧 AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY secret は Step 7 (2026-05-24) で削除済 = rollback 不可。
+# 鍵 rotation は scripts/generate-oidc-keypair.mjs + wrangler secret put (Step 8 runbook 参照)。
 
 # ---- SERVER_STATE KV ----
 # 2 用途で使う:
@@ -74,11 +67,9 @@ crons = ["*/5 * * * *"]
 # シークレットは wrangler secret put NAME で投入する (このファイルには書かない):
 #   - DISCORD_PUBLIC_KEY      ed25519 verification
 #   - DISCORD_BOT_TOKEN       (interaction follow-up message 用)
-#   - AWS_ACCESS_KEY_ID       Phase 5 Step 7 で削除予定 (OIDC 移行完了後)
-#   - AWS_SECRET_ACCESS_KEY   同上
 #   - CLOUDFLARE_DNS_API_TOKEN
 #   - SIDECAR_HMAC_SECRETS    Phase 3: sidecar 認証用 game→secret の JSON map
 #                             例: {"atm11":"<base64 secret>"}
 #                             sidecar 側は SSM /gs/<game>/sidecar_hmac_secret を読む
-#   - OIDC_PRIVATE_KEYS_JWK   Phase 5 Step 1.5 投入済。RSA-2048 配列 (rotation 用 multi-kid 並走)
-#   - OIDC_SUB                Phase 5 Step 2 投入済。AssumeRoleWithWebIdentity の sub claim 値
+#   - OIDC_PRIVATE_KEYS_JWK   Phase 5: RSA-2048 JWK 配列 (rotation 用 multi-kid 並走、最新 created_at が現用)
+#   - OIDC_SUB                Phase 5: AssumeRoleWithWebIdentity の sub claim 値 (= AWS trust policy condition の比較対象)
