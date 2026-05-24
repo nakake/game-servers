@@ -474,16 +474,25 @@ data "aws_iam_policy_document" "gs_worker_oidc" {
       "arn:aws:ec2:${var.aws_region}:${data.aws_caller_identity.current.account_id}:instance/*",
       "arn:aws:ec2:${var.aws_region}:${data.aws_caller_identity.current.account_id}:volume/*",
       "arn:aws:ec2:${var.aws_region}:${data.aws_caller_identity.current.account_id}:snapshot/*",
+      # snapshot は account-less ARN format でも参照される (実 CreateSnapshot 内部の
+      # implicit CreateTags 評価で arn:aws:ec2:<region>::snapshot/* に対して deny を観測、
+      # 2026-05-24)。両 format を allow しないと wildcard match しない。
+      "arn:aws:ec2:${var.aws_region}::snapshot/*",
     ]
 
+    # CreateAction も AWS の attach 仕様で resource 依存。RunInstances 内部の implicit
+    # CreateTags 評価では CreateAction が context に attach されるが、CreateSnapshot 内部の
+    # implicit CreateTags 評価では一部 resource (account-less snapshot ARN) で attach されない
+    # 可能性があるため IfExists 化。Project tag 強制 (下) で「単独 CreateTags での tag 偽装」
+    # は引き続き遮断される。
     condition {
-      test     = "StringEquals"
+      test     = "StringEqualsIfExists"
       variable = "ec2:CreateAction"
       values   = ["RunInstances", "CreateSnapshot"]
     }
 
     condition {
-      test     = "StringEquals"
+      test     = "StringEqualsIfExists"
       variable = "aws:RequestTag/Project"
       values   = ["game-servers"]
     }
