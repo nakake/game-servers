@@ -215,6 +215,7 @@ async function executeStopWorkflow(
           tags: {
             Project: 'game-servers',
             Game: gameId,
+            Env: 'prod',
             Purpose: 'game-world',
             [GAME_WORLD_SNAPSHOT_TAG_KEY]: GAME_WORLD_SNAPSHOT_TAG_VALUE,
             CreatedAt: new Date().toISOString(),

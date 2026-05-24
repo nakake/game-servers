@@ -74,8 +74,36 @@ source "amazon-ebs" "gs_game_server" {
   # 名前で絞る運用ではない。
   tags = {
     Project = "game-servers"
+    Env     = "prod"
     Name    = "gs-game-server"
     Version = var.ami_version
+    BuiltBy = "packer"
+  }
+
+  # AMI と一緒に作られる EBS snapshot に付くタグ。Phase 5 Step 2.5 の IAM policy
+  # tightening が `aws:ResourceTag/Env = "prod"` 条件を全 snapshot に要求するため、
+  # Packer 由来の AMI snapshot にも明示的に付与する (= 将来 Env tag 欠落で新 snapshot
+  # が policy 条件を満たさず Worker から見えなくなる事故を防ぐ)。
+  snapshot_tags = {
+    Project = "game-servers"
+    Env     = "prod"
+    Name    = "gs-game-server"
+    Version = var.ami_version
+    BuiltBy = "packer"
+  }
+
+  # Packer build 中の builder EC2 / EBS volume に付くタグ。build 中の resource にも
+  # Project + Env を貼っておくと、ビルド失敗で残存した resource を tag 検索で発見できる。
+  run_tags = {
+    Project = "game-servers"
+    Env     = "prod"
+    Name    = "gs-game-server-builder"
+    BuiltBy = "packer"
+  }
+  run_volume_tags = {
+    Project = "game-servers"
+    Env     = "prod"
+    Name    = "gs-game-server-builder"
     BuiltBy = "packer"
   }
 }

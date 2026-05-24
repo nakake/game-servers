@@ -246,14 +246,20 @@ Worker コード変更: なし (rev5 で thumbprint cron 廃止、Step 3 の sen
 
 **新 policy は全 resource 系 statement に `aws:ResourceTag/Env = "prod"` 条件を付けるため、tag 未付与の既存 resource があると `/start` `/stop` / cron が即時 AccessDenied で停止する**。Step 2.5 本体の terraform apply 前に必ず以下を完了させる。
 
-- [ ] **欠落検出** (AWS CLI、ユーザー実行):
-  - 既存 EC2: `aws ec2 describe-instances --filters "Name=tag:Project,Values=game-servers" --query 'Reservations[].Instances[?!Tags[?Key==\`Env\`]].InstanceId' --output text`
-  - 既存 EBS volume: `aws ec2 describe-volumes --filters "Name=tag:Project,Values=game-servers" --query 'Volumes[?!Tags[?Key==\`Env\`]].VolumeId' --output text`
-  - 既存 snapshot: `aws ec2 describe-snapshots --owner-ids self --filters "Name=tag:Project,Values=game-servers" --query 'Snapshots[?!Tags[?Key==\`Env\`]].SnapshotId' --output text`
-- [ ] **欠落 resource に `Env=prod` を backfill**: `aws ec2 create-tags --resources <ID1> <ID2>... --tags Key=Env,Value=prod`
-- [ ] **Launch Template の `tag_specifications` 確認**: 起動時に EC2 / EBS / snapshot に `Env=prod` が自動付与されるか `aws ec2 describe-launch-template-versions` で確認。欠落なら `infra/envs/prod/compute.tf` の `tag_specifications` に追加 → terraform apply
-- [ ] **再確認**: 上記 3 つの検出コマンドの出力が **すべて空** であることを確認 (= 欠落ゼロ)
-- [ ] **runbook 記載**: `docs/runbook-phase5-oidc.md` に「Phase 5 cutover 前の事前確認」セクションとして検出 + backfill 手順を残す (将来の新 resource にも適用)
+- [x] **欠落検出** (AWS CLI、2026-05-24 実施):
+  - 既存 EC2: `aws ec2 describe-instances --filters "Name=tag:Project,Values=game-servers" --query "Reservations[].Instances[?!not_null(Tags[?Key=='Env'].Value | [0])].InstanceId" --output text` → 空 (current 0 instances)
+  - 既存 EBS volume: 同形式の `describe-volumes` → 空 (current 0 volumes)
+  - 既存 snapshot: 同形式の `describe-snapshots` → **4 件欠落** (`snap-06e434398fafc82d6` / `snap-0ea1b9f2b2642acdd` / `snap-0dfd4494f5e2b88b3` / `snap-033f6fa6ea246eecb`)
+  - 注: 当初計画の `Tags[?Key==\`Env\`]` 形式は PowerShell でバックティックがエスケープされて壊れるため、`not_null(... | [0])` 形式に書き直して runbook に確定版を残した
+- [x] **欠落 resource に `Env=prod` を backfill** (2026-05-24): 上記 snapshot 4 件に `aws ec2 create-tags --resources snap-... --tags Key=Env,Value=prod` 実施。AMI 由来 snapshot (`snap-033f6fa6...`) も将来一貫性のため backfill 対象に含めた
+- [x] **Launch Template の `tag_specifications` 確認** (2026-05-24): `infra/envs/prod/compute.tf` L68-83 で instance / volume の双方に `Env=prod` 焼き込み済を確認。terraform apply 不要
+- [x] **将来の new resource にも自動付与される経路を担保** (2026-05-24 追加対応):
+  - `workers/discord-handler/src/handlers/discord/start.ts` `volumeTags` に `Env: 'prod'` 追加 (instanceTags は既存)。RunInstances の TagSpecification は LT を上書きするため Worker 側で必ず明示するコメント方針 (L179-181) に整合
+  - `workers/discord-handler/src/handlers/stop-workflow.ts` `createSnapshot` の tags map に `Env: 'prod'` 追加
+  - `ami/game-server.pkr.hcl` に `snapshot_tags` / `run_tags` / `run_volume_tags` を追加 (AMI 本体の `tags` block は snapshot に伝播しないため。次回 `pnpm build-sidecar-ami` から有効)
+  - 上記コード修正は 104/104 test pass + Packer `validate -syntax-only` 通過
+- [x] **再確認**: 3 つの検出コマンド出力すべて空であることを 2026-05-24 確認
+- [x] **runbook 記載**: `docs/runbook-phase5-oidc.md` を新規作成、§0 「cutover 前の事前確認」セクションに検出 + backfill + 4 経路の自動付与一覧 + 過去対応履歴を記載
 
 #### Step 2.5.1: 新 policy 構築
 

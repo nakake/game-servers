@@ -194,6 +194,7 @@ async function executeStart(
       volumeTags: {
         Project: 'game-servers',
         Game: gameId,
+        Env: 'prod',
         Purpose: 'game-world',
       },
       blockDeviceMappings: [
