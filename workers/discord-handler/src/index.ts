@@ -12,6 +12,7 @@ import { handleSidecarHeartbeat } from './handlers/sidecar/heartbeat.js';
 import { handleSidecarIdleDetected } from './handlers/sidecar/idle-detected.js';
 import { handleSidecarRegistry } from './handlers/sidecar/registry.js';
 import { handleSnapshotRetention } from './handlers/snapshot-retention.js';
+import { buildDiscoveryDocument, buildJwks, deriveIssuerUrl } from './lib/auth/oidc-issuer.js';
 import type { Env } from './env.js';
 
 export type { Env };
@@ -57,6 +58,22 @@ export default {
 
     if (request.method === 'POST' && url.pathname === '/admin/docker-stop') {
       return handleAdminDockerStop(request, env);
+    }
+
+    // /oidc/.well-known/* — Phase 5 OIDC issuer endpoints (public、JWKS + discovery doc のみ)。
+    // 主防御は edge cache (s-maxage=86400) によるオリジン到達抑制。
+    // 注: signOidcToken を expose する route を絶対追加しない (oidc-issuer.ts で module-private)。
+    if (request.method === 'GET' && url.pathname === '/oidc/.well-known/openid-configuration') {
+      const issuerUrl = deriveIssuerUrl(env);
+      return Response.json(buildDiscoveryDocument(issuerUrl), {
+        headers: { 'cache-control': 'public, max-age=3600, s-maxage=86400' },
+      });
+    }
+    if (request.method === 'GET' && url.pathname === '/oidc/.well-known/jwks.json') {
+      const jwks = await buildJwks(env);
+      return Response.json(jwks, {
+        headers: { 'cache-control': 'public, max-age=3600, s-maxage=86400' },
+      });
     }
 
     return new Response('Not Found\n', {

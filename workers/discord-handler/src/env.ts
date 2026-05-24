@@ -8,11 +8,32 @@ export interface Env {
   // /admin/* endpoint の Bearer 認証
   ADMIN_API_KEY: string;
 
-  // ---- AWS (IAM Access Key, Phase 2 で OIDC に移行) ----
+  // ---- AWS (IAM Access Key、Phase 5 で OIDC に移行中) ----
+  // Phase 5 cutover 完了後 (Step 7) に AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY を削除し
+  // AWS_AUTH_MODE を必須 'oidc' に変更する。
   AWS_ACCESS_KEY_ID: string;
   AWS_SECRET_ACCESS_KEY: string;
   // optional: 省略時は ap-northeast-1
   AWS_REGION?: string;
+
+  // ---- AWS OIDC (Phase 5) ----
+  // 認証モードの段階移行フラグ。未設定または 'static' なら従来の IAM Access Key 経路、
+  // 'oidc' なら OIDC token + STS AssumeRoleWithWebIdentity 経路 (lib/aws/credentials.ts)。
+  // Step 6 cutover 時に vars で 'oidc' に切替、Step 7 で完全 OIDC 化後は env から削除可。
+  AWS_AUTH_MODE?: 'static' | 'oidc';
+  // AssumeRoleWithWebIdentity の対象 IAM Role ARN (Step 2 で Terraform 出力した値)。
+  // vars 配置で OK (漏れても sub/aud condition で守られる、phase5-plan.md 決定6)。
+  // 例: "arn:aws:iam::123456789012:role/gs-worker-oidc-role"
+  AWS_OIDC_ROLE_ARN?: string;
+  // OIDC JWT に焼く `sub` claim (推測困難な random suffix 付き、phase5-plan.md 決定13)。
+  // vars ではなく Workers Secret に置く: `wrangler secret put OIDC_SUB`。
+  // trust policy condition で完全一致検証されるため、AWS_OIDC_ROLE_ARN と組み合わせて多層防御。
+  OIDC_SUB?: string;
+  // OIDC issuer の private key 配列 (JWKS 形式の JSON 文字列)。
+  // 形式: `{"keys":[{"kid":"...","kty":"RSA","n":"...","d":"...","e":"AQAB","created_at":1234567890}, ...]}`
+  // 配列で持つことで rotation 中の新旧並走 (multi-kid) が可能。最新 created_at の鍵が現用。
+  // 投入: `wrangler secret put OIDC_PRIVATE_KEYS_JWK` (生成は scripts/generate-oidc-keypair.mjs)。
+  OIDC_PRIVATE_KEYS_JWK?: string;
 
   // ---- Discord ----
   // Discord Developer Portal の Application → General Information → Public Key (hex)。
