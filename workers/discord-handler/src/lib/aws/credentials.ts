@@ -119,9 +119,15 @@ async function fetchOidcCredentials(
   let token: string;
   try {
     token = await issueStsWebIdentityToken(env);
-  } catch (_err) {
-    // JWT 発行失敗 = OIDC_SUB 未設定 / private key 不正 / etc. の config 不備。
-    // 詳細は console (内部 log) に残し、Discord には code のみ流す。
+  } catch (err) {
+    // JWT 発行失敗 = OIDC_SUB 未設定 / private key 不正 / WORKER_PUBLIC_URL 未設定 等の config 不備。
+    // 詳細メッセージは wrangler tail で根本原因を切り分けるため console.error に残す
+    // (JWT 本体は ttl=60s の短命で token 自体は未生成なので機密漏洩リスク無し)。
+    // Discord 通知には code のみ (ARN/account ID 漏洩防止)。
+    console.error(
+      'issueStsWebIdentityToken failed:',
+      err instanceof Error ? `${err.name}: ${err.message}` : String(err),
+    );
     await notifyOidcFailure(env, ctx, 'JwtIssueFailed', 0);
     throw new OidcCredentialError('JwtIssueFailed', 0);
   }
