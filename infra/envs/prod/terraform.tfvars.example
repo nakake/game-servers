@@ -9,3 +9,23 @@ worker_notification_url = "https://discord-handler.<your-account>.workers.dev/aw
 # 既定でよければ以下は省略可
 # monthly_budget_usd               = 20
 # budget_warning_threshold_percent = 75
+
+# ---- Phase 5: Worker OIDC (docs/phase5-plan.md Step 2) ----
+
+# Step 1.5 deploy 後の Worker OIDC issuer URL (末尾 /oidc 必須、スラッシュなし)
+worker_oidc_issuer_url = "https://discord-handler.<your-account>.workers.dev/oidc"
+
+# Cloudflare TLS cert chain の SHA-1 fingerprint (colon なし lowercase hex 40 桁)。
+# 取得: scripts/get-cf-thumbprint.{sh,ps1} discord-handler.<your-account>.workers.dev
+# 推奨: intermediate (cert #1) を 1 個。leaf も入れて 2 件にしておくと cert ローテで暫定対応可。
+worker_oidc_thumbprints = [
+  # "<intermediate cert SHA-1>",
+  # "<leaf cert SHA-1>",  # optional, fallback for cert rotation
+]
+
+# worker_oidc_sub は **tfvars に書かず -var フラグで渡す** 運用 (緊急 rotation 方式 A 対応):
+#
+#   terraform apply -var="worker_oidc_sub=discord-handler-<8 文字 random>"
+#
+# Workers Secret `OIDC_SUB` と完全一致必須。漏洩疑い時は "REVOKED-<timestamp>" 等の
+# 到達不能値で apply 1 回 → 新値で再 apply (docs/phase5-plan.md Step 8 緊急 rotation 方式 A)。

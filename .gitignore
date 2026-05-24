@@ -24,6 +24,11 @@ wrangler.toml.local
 # Phase 1 検証用の throwaway 秘密鍵 (Discord 署名検証テスト)
 .discord-test-keypair.json
 
+# Phase 5 検証用のローカル OIDC private JWK (scripts/sign-test-jwt.mjs 経由で AWS CLI 検証時に作成)。
+# 検証後すぐ削除する運用だが、誤コミット防止のため defensive に ignore する。
+test-jwk.json
+test-jwt.txt
+
 # ============================================================
 # Node.js / pnpm
 # ============================================================

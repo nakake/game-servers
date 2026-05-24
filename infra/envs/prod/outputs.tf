@@ -37,3 +37,15 @@ output "launch_template_id" {
   description = "wrangler.toml の EC2_LAUNCH_TEMPLATE_ID。Worker が RunInstances の LaunchTemplate 参照に使う (Step 5b で切替)"
   value       = aws_launch_template.game_server.id
 }
+
+# ---- Phase 5: Worker OIDC ----
+
+output "worker_oidc_role_arn" {
+  description = "Phase 5 で Worker が AssumeRoleWithWebIdentity で引き受ける IAM Role ARN。wrangler.toml [vars] AWS_OIDC_ROLE_ARN に設定する (Step 6 cutover で必要)"
+  value       = module.worker_oidc.role_arn
+}
+
+output "worker_oidc_provider_arn" {
+  description = "OIDC Identity Provider ARN。緊急 rotation や thumbprint 監視で参照"
+  value       = module.worker_oidc.oidc_provider_arn
+}

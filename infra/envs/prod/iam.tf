@@ -69,9 +69,10 @@ resource "aws_iam_role_policy" "ec2_sns_publish" {
 # ===========================================================================
 # Worker 呼び出し用 IAM user: gs-worker-caller
 # ===========================================================================
-# Access Key は IaC 管理外 (docs/iac-migration-plan.md Step 1 / Open Questions)。
-# 既存キー (AKIA...JCUVJ74) はそのまま運用し, Phase 2 の OIDC 移行
-# (Workers → AWS AssumeRole, design.md §5.6) でキー方式ごと廃止する。
+# Phase 5 (docs/phase5-plan.md) で OIDC + AssumeRoleWithWebIdentity に移行中。
+# Step 2 (現在): 新 OIDC role を並走で作成、user 側はまだ残す (rollback 余地)。
+# Step 7 (cutover 後 24h): Access Key + user + policy を削除、user 側を完全廃止する。
+# 既存 Access Key (AKIA...JCUVJ74) は IaC 管理外、Step 7 で AWS CLI 経由で削除する。
 
 resource "aws_iam_user" "gs_worker_caller" {
   name = "gs-worker-caller"
@@ -159,4 +160,24 @@ resource "aws_iam_policy" "gs_worker_caller" {
 resource "aws_iam_user_policy_attachment" "gs_worker_caller" {
   user       = aws_iam_user.gs_worker_caller.name
   policy_arn = aws_iam_policy.gs_worker_caller.arn
+}
+
+# ===========================================================================
+# Phase 5: Worker → AWS OIDC role
+# ===========================================================================
+# Cloudflare Worker が自身を OIDC issuer 化し、AssumeRoleWithWebIdentity で
+# 15min credentials を取得する経路 (docs/phase5-plan.md Step 2)。
+# Policy attachment は Step 2.5 (least privilege 化) で別途追加する。
+# 本 Step では provider + role の trust 関係のみを構築し、apply 後に AWS CLI で
+# AssumeRoleWithWebIdentity が成功することを scripts/sign-test-jwt.mjs で手動検証する。
+
+module "worker_oidc" {
+  source = "../../modules/aws-oidc-cloudflare"
+
+  worker_issuer_url = var.worker_oidc_issuer_url
+  thumbprints       = var.worker_oidc_thumbprints
+  expected_sub      = var.worker_oidc_sub
+  role_name         = "gs-worker-oidc-role"
+  # max_session_duration はモジュール default の 3600 (AWS API 最小値) を使う。
+  # 実際の session 時間 (15min) は Worker 側 STS 呼び出し時の DurationSeconds で指定する。
 }

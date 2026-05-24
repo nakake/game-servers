@@ -31,3 +31,26 @@ variable "admin_ssh_cidr" {
   type        = string
   default     = "126.94.68.118/32"
 }
+
+# ---- Phase 5: Worker OIDC (docs/phase5-plan.md Step 2) ----
+
+variable "worker_oidc_issuer_url" {
+  description = "Worker OIDC issuer URL (= Step 1.5 deploy 後の `https://<worker>.workers.dev/oidc`)。末尾スラッシュ無し"
+  type        = string
+
+  validation {
+    condition     = startswith(var.worker_oidc_issuer_url, "https://") && endswith(var.worker_oidc_issuer_url, "/oidc")
+    error_message = "worker_oidc_issuer_url must start with https:// and end with /oidc"
+  }
+}
+
+variable "worker_oidc_thumbprints" {
+  description = "Cloudflare TLS cert chain の SHA-1 fingerprint list (colon なし lowercase hex 40 桁)。scripts/get-cf-thumbprint.{sh,ps1} で取得"
+  type        = list(string)
+}
+
+variable "worker_oidc_sub" {
+  description = "AssumeRoleWithWebIdentity を許可する OIDC sub claim 値。`OIDC_SUB` Workers Secret と一致必須。tfvars に書かず `-var=worker_oidc_sub=<value>` で渡す運用 (緊急 rotation 方式 A 対応)"
+  type        = string
+  sensitive   = true
+}
