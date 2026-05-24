@@ -325,6 +325,10 @@ data "aws_iam_policy_document" "gs_worker_oidc" {
       "arn:aws:ec2:${var.aws_region}:${data.aws_caller_identity.current.account_id}:launch-template/*",
       # image (AMI) は AWS のアカウントレス resource (Amazon 提供 / 共有 AMI 含む)
       "arn:aws:ec2:${var.aws_region}::image/*",
+      # snapshot は BlockDeviceMappings.Ebs.SnapshotId で復元元として参照される。
+      # account-less / account 付きの両方の ARN format があるので両方明示。
+      "arn:aws:ec2:${var.aws_region}::snapshot/*",
+      "arn:aws:ec2:${var.aws_region}:${data.aws_caller_identity.current.account_id}:snapshot/*",
     ]
     # condition 無し。AWS は LT / InstanceType / RequestTag を instance resource にしか attach
     # しないため、これらの statement に condition を付けると常に null 比較で fail する。
