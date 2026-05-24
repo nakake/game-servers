@@ -323,21 +323,19 @@ data "aws_iam_policy_document" "gs_worker_oidc" {
       # image (AMI) は AWS のアカウントレス resource (Amazon 提供 / 共有 AMI 含む)
       "arn:aws:ec2:${var.aws_region}::image/*",
     ]
-
-    condition {
-      test     = "ArnEquals"
-      variable = "ec2:LaunchTemplate"
-      values   = [aws_launch_template.game_server.arn]
-    }
-
-    condition {
-      test     = "StringEquals"
-      variable = "ec2:InstanceType"
-      values   = var.worker_oidc_allowed_instance_types
-    }
-    # RequestTag/Env 条件は付けない。これらの resource type は RunInstances request の
-    # context に request tag を持たない (non-taggable または「使われるだけ」の resource)。
-    # 攻撃者の cryptojacking 抑止は LaunchTemplate + InstanceType condition で担保される。
+    # condition 無し (= 無条件 allow)。理由:
+    #   - これらの resource type の evaluation context には ec2:LaunchTemplate /
+    #     ec2:InstanceType / aws:RequestTag/<key> が存在しない (実 RunInstances API で
+    #     2026-05-24 UnauthorizedOperation を 2 回踏んで判明: AWS の policy evaluator は
+    #     request-context key を「該当 resource type に attach されるもの」のみに limit する)。
+    #     StringEquals / ArnEquals は null 比較で必ず fail し UnauthorizedOperation になる。
+    #   - これらは「Worker が参照するだけの既存 resource」(key-pair, sg, subnet, eni,
+    #     launch-template) または AMI で、Worker が新規作成しない。account 共有なので
+    #     attacker が用意した resource を埋め込むことも不可。
+    #   - cryptojacking 抑止は instance resource を扱う Ec2RunInstancesTaggable 側で
+    #     LT + InstanceType + Env=prod 条件付き = 攻撃者は任意 LT / 任意 type で
+    #     instance を起動できない (= 本 statement に condition を付けても多層防御
+    #     としての価値はゼロ)。
   }
 
   # ---- EC2 TerminateInstances ----
