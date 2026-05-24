@@ -13,6 +13,8 @@ export type {
 
 export { AwsApiError, parseJsonError } from './errors.js';
 
+export { getAwsCredentials, OidcCredentialError } from './credentials.js';
+
 export {
   sendShellCommand,
   getCommandInvocation,

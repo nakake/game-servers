@@ -25,6 +25,7 @@ import {
   describeSnapshotsByTag,
   GAME_WORLD_SNAPSHOT_TAG_KEY,
   GAME_WORLD_SNAPSHOT_TAG_VALUE,
+  getAwsCredentials,
 } from '../lib/aws/index.js';
 import { buildCronFailureNotification } from '../lib/discord/notifications.js';
 import { postDiscordWebhookMessage } from '../lib/discord/webhook.js';
@@ -35,13 +36,11 @@ import type { Env } from '../env.js';
 // 同一 game の retention 失敗は 1 時間 1 回まで通知 (Cron は 5 分間隔なので最悪 12 連投を 1 連投に圧縮)。
 const FAILURE_NOTIFY_TTL_SECONDS = 3600;
 
-export async function handleSnapshotRetention(env: Env): Promise<void> {
+export async function handleSnapshotRetention(env: Env, ctx: ExecutionContext): Promise<void> {
+  const credentials = await getAwsCredentials(env, ctx);
   const ec2 = new AwsApiClient({
     region: env.AWS_REGION ?? 'ap-northeast-1',
-    credentials: {
-      accessKeyId: env.AWS_ACCESS_KEY_ID,
-      secretAccessKey: env.AWS_SECRET_ACCESS_KEY,
-    },
+    credentials,
   });
 
   const games = await listGames(env.GAME_REGISTRY);

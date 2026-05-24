@@ -24,6 +24,7 @@ import {
   createSnapshot,
   describeInstancesByTag,
   describeVolumesByTag,
+  getAwsCredentials,
   sendShellCommand,
   terminateInstances,
   waitForCommand,
@@ -86,10 +87,11 @@ export type StopWorkflowOutcome =
 
 export async function runStopWorkflow(
   env: Env,
+  ctx: ExecutionContext,
   game: GameDefinition,
   opts: RunStopWorkflowOptions,
 ): Promise<StopWorkflowOutcome> {
-  const outcome = await executeStopWorkflow(env, game, opts);
+  const outcome = await executeStopWorkflow(env, ctx, game, opts);
 
   // Phase 4 Step 2: Discord 経由以外の発火 (sidecar / cron-fallback) は Discord channel に
   // webhook 通知を出す。Discord 経由は元 interaction の follow-up edit が既に出るので不要。
@@ -110,6 +112,7 @@ export async function runStopWorkflow(
 
 async function executeStopWorkflow(
   env: Env,
+  ctx: ExecutionContext,
   game: GameDefinition,
   opts: RunStopWorkflowOptions,
 ): Promise<StopWorkflowOutcome> {
@@ -133,12 +136,10 @@ async function executeStopWorkflow(
   );
 
   try {
+    const credentials = await getAwsCredentials(env, ctx);
     const ec2 = new AwsApiClient({
       region: env.AWS_REGION ?? 'ap-northeast-1',
-      credentials: {
-        accessKeyId: env.AWS_ACCESS_KEY_ID,
-        secretAccessKey: env.AWS_SECRET_ACCESS_KEY,
-      },
+      credentials,
     });
     const cf = new CloudflareDnsClient({ apiToken: env.CLOUDFLARE_DNS_API_TOKEN });
 

@@ -49,7 +49,7 @@ export async function handleSidecarIdleDetected(
   ctx.waitUntil(
     (async () => {
       try {
-        const outcome = await runStopWorkflow(env, game, {
+        const outcome = await runStopWorkflow(env, ctx, game, {
           triggeredBy: 'sidecar',
           expectedInstanceId,
         });

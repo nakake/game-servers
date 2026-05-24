@@ -34,7 +34,7 @@ export async function handleStopCommand(
     });
   }
 
-  ctx.waitUntil(executeStop(game, interaction, env));
+  ctx.waitUntil(executeStop(game, interaction, env, ctx));
 
   return Response.json({
     type: InteractionResponseType.DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE,
@@ -51,13 +51,14 @@ async function executeStop(
   game: GameDefinition,
   interaction: Interaction,
   env: Env,
+  ctx: ExecutionContext,
 ): Promise<void> {
   const followUp = new DiscordFollowUpClient({
     applicationId: env.DISCORD_APPLICATION_ID,
     interactionToken: interaction.token,
   });
 
-  const outcome = await runStopWorkflow(env, game, {
+  const outcome = await runStopWorkflow(env, ctx, game, {
     triggeredBy: 'discord',
     onProgress: (msg) => safeEdit(followUp, msg),
   });

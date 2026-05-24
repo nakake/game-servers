@@ -15,6 +15,7 @@ import {
   deleteVolume,
   describeSnapshotById,
   describeVolumeById,
+  getAwsCredentials,
 } from '../lib/aws/index.js';
 import { buildCronFailureNotification } from '../lib/discord/notifications.js';
 import { postDiscordWebhookMessage } from '../lib/discord/webhook.js';
@@ -25,17 +26,15 @@ import type { Env } from '../env.js';
 // 同一 volume の失敗は 1 時間 1 回まで通知 (Cron は 5 分間隔)。
 const FAILURE_NOTIFY_TTL_SECONDS = 3600;
 
-export async function handleVolumeCleanup(env: Env): Promise<void> {
+export async function handleVolumeCleanup(env: Env, ctx: ExecutionContext): Promise<void> {
   const kv = env.SERVER_STATE;
   const pending = await listPendingCleanups(kv);
   if (pending.length === 0) return;
 
+  const credentials = await getAwsCredentials(env, ctx);
   const ec2 = new AwsApiClient({
     region: env.AWS_REGION ?? 'ap-northeast-1',
-    credentials: {
-      accessKeyId: env.AWS_ACCESS_KEY_ID,
-      secretAccessKey: env.AWS_SECRET_ACCESS_KEY,
-    },
+    credentials,
   });
 
   for (const entry of pending) {

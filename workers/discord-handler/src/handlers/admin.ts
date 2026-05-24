@@ -6,13 +6,18 @@
 
 import {
   AwsApiClient,
+  getAwsCredentials,
   sendShellCommand,
   waitForCommand,
   type CommandInvocation,
 } from '../lib/aws/index.js';
 import type { Env } from '../env.js';
 
-export async function handleAdminDockerStop(request: Request, env: Env): Promise<Response> {
+export async function handleAdminDockerStop(
+  request: Request,
+  env: Env,
+  ctx: ExecutionContext,
+): Promise<Response> {
   // 認証
   const auth = request.headers.get('authorization');
   if (!env.ADMIN_API_KEY || auth !== `Bearer ${env.ADMIN_API_KEY}`) {
@@ -40,12 +45,10 @@ export async function handleAdminDockerStop(request: Request, env: Env): Promise
   const containerName = body.containerName;
   const graceSeconds = body.graceSeconds ?? 60;
 
+  const credentials = await getAwsCredentials(env, ctx);
   const client = new AwsApiClient({
     region: env.AWS_REGION ?? 'ap-northeast-1',
-    credentials: {
-      accessKeyId: env.AWS_ACCESS_KEY_ID,
-      secretAccessKey: env.AWS_SECRET_ACCESS_KEY,
-    },
+    credentials,
   });
 
   try {

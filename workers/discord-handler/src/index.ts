@@ -57,7 +57,7 @@ export default {
     }
 
     if (request.method === 'POST' && url.pathname === '/admin/docker-stop') {
-      return handleAdminDockerStop(request, env);
+      return handleAdminDockerStop(request, env, ctx);
     }
 
     // /oidc/.well-known/* — Phase 5 OIDC issuer endpoints (public、JWKS + discovery doc のみ)。
@@ -88,8 +88,8 @@ export default {
   //   - handleIdleFallback     : sidecar が沈黙した game を強制停止 (Phase 3 Step 3、保険経路)
   // 互いに独立 (volume 削除 vs snapshot 削除 vs idle 判定) なので個別の waitUntil で並行に走らせる。
   async scheduled(_controller: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
-    ctx.waitUntil(handleVolumeCleanup(env));
-    ctx.waitUntil(handleSnapshotRetention(env));
-    ctx.waitUntil(handleIdleFallback(env).then(() => undefined));
+    ctx.waitUntil(handleVolumeCleanup(env, ctx));
+    ctx.waitUntil(handleSnapshotRetention(env, ctx));
+    ctx.waitUntil(handleIdleFallback(env, ctx).then(() => undefined));
   },
 } satisfies ExportedHandler<Env>;

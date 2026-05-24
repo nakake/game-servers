@@ -317,86 +317,110 @@ Worker コード変更: なし。Infra 変更: **あり**。
 
 Worker コード変更: **あり (新 module + 全 14 テスト)**。Infra 変更: なし。**Step 3 完了 (2026-05-24)**。
 
-### Step 4: Staging Worker セットアップと受入テスト
+### Step 4: Staging Worker セットアップと受入テスト ~~(rev7 で skip 確定)~~
 
-本番一発 cutover を避けるため別 Worker subdomain で受入テスト。
-
-- [ ] **`wrangler.toml` に `[env.staging]` 追加**:
-  - `name = "discord-handler-staging"`
-  - 別 KV namespace (`SERVER_STATE_STAGING` / `GAME_REGISTRY_STAGING`)
-  - vars: `AWS_AUTH_MODE = "oidc"`, `AWS_OIDC_ROLE_ARN = <staging role>` (vars)
-  - **`OIDC_SUB` は secret として別途投入** (`wrangler secret put OIDC_SUB --env staging`、値は `discord-handler-<random>-stg`)
-- [ ] **Staging 用 OIDC private key** を別途生成し `wrangler secret put OIDC_PRIVATE_KEYS_JWK --env staging` (**本番鍵とは独立、漏洩波及禁止**)
-- [ ] **Staging 用 OIDC provider + Role + 専用 policy** を Terraform で別途構築。**tfstate 汚染を避けるため `infra/envs/staging/` 配下に独立した env として切る** (`infra/envs/prod/` への staging module 同居は禁止 — staging 試行錯誤が本番 plan に紛れる):
-  - `infra/envs/staging/` を新設、独自の backend (別 S3 key) と provider 設定
-  - `module "worker_oidc"` を staging 用パラメータ (sub / Env=staging policy) で呼び出し
-  - 本番 module `infra/envs/prod/` には staging 関連 resource を一切置かない
-  - **専用 `gs-worker-oidc-staging-policy`** を作る (本番 policy の attach は禁止、決定11)
-  - 全 resource 系 statement に `aws:ResourceTag/Env = "staging"` 条件を付与 (本番 `Env = "prod"` resource にアクセス不可能になる)
-  - `ec2:RunInstances` の `aws:RequestTag/Env = "staging"` 強制 (起動時 staging tag 必須)
-  - これにより staging private key 漏洩しても本番 EC2 を terminate できない構造的分離
-- [ ] **`pnpm wrangler deploy --env staging`** で deploy
-- [ ] **Staging URL** での受入テスト (本番 ATM11 とは別 instance / 別 Game tag を使い影響分離):
-  - `curl https://discord-handler-staging.<account>.workers.dev/oidc/.well-known/jwks.json` 200
-  - Discord 管理画面で staging Worker URL を別アプリの interaction endpoint に登録 (検証用 Discord ギルド作成)
-  - `/list` `/status` (副作用なし) を試行
-  - 検証用 game の `/start` `/stop` を 1 サイクル、`wrangler tail --env staging` で STS 呼び出し / KV cache / 短期 credentials の利用を確認
-  - cron が回る (5min 待機) ことを `wrangler tail --env staging` で確認
-- [ ] **Staging で見つかった不具合は Step 1〜3 にループバック修正**
-- [ ] 受入テストが通ったら本 Step 完了
-
-Worker コード変更: なし (env 追加のみ)。Infra 変更: **あり (staging OIDC)**。
+> **rev7 (2026-05-24): 本 Step は skip 確定**。理由: 現状 deploy 済の本番 Worker (`discord-handler.<your-account>.workers.dev`) は**友人公開前で検証用 Discord ギルドにのみ接続中**であり、計画書当初の「staging = 公開前の隔離環境」の役割を**そのまま既に果たしている**。本 Step を実施しても得られる追加価値は次の Phase 6 (新 game 追加 / 破壊的変更検証) で初めて元が取れる投資となるため、**Phase 6 着手時に再評価** とする (友人公開ギルド出来後、staging の用途が「本番影響を避けた破壊的変更の試行場」に明確化されるため)。
+>
+> **代替**: Step 6 を 3 段階リハーサル (Phase A 副作用ゼロ / Phase B 実起動 / Phase C rollback パス確認) に強化することで、本番 1 発 cutover のリスクを Step 4 と同等以下に圧縮する (改 Step 6 参照)。
+>
+> **持ち越し項目** (Phase 6 で staging を立てる際に拾い直す):
+> - `wrangler.toml [env.staging]` + 専用 KV namespace
+> - `infra/envs/staging/` で OIDC provider / role / **専用 `gs-worker-oidc-staging-policy`** (本番 policy 流用禁止、`aws:ResourceTag/Env = "staging"` で本番 resource を構造遮断)
+> - staging 専用 OIDC private key + `OIDC_SUB`
+> - 検証用 Discord アプリ + ギルドの整備
+> - 詳細手順は本 rev 以前 (rev6) の本セクションを git 履歴で参照
 
 ### Step 5: 全 callsite を credential provider 経由に統一
 
-7 callsite (`grep -n "new AwsApiClient" workers/discord-handler/src`) を `getAwsCredentials(env, ctx)` 経由に置換。
+6 callsite (`grep -n "new AwsApiClient" workers/discord-handler/src` で確定) を `getAwsCredentials(env, ctx)` 経由に置換。
 
-- [ ] **対象**:
-  - `handlers/discord/start.ts`
-  - `handlers/discord/status.ts`
-  - `handlers/discord/stop.ts` (経由する `stop-workflow.ts`)
-  - `handlers/stop-workflow.ts`
-  - `handlers/snapshot-retention.ts`
-  - `handlers/cleanup.ts`
-  - `handlers/admin.ts`
-- [ ] **置換パターン**:
+- [x] **対象** (2026-05-24 commit、6 ファイル):
+  - `handlers/discord/start.ts` — `executeStart` に ctx 引き継ぎ + `getAwsCredentials` で credentials 取得
+  - `handlers/discord/status.ts` — `executeStatus` に ctx 引き継ぎ + 同上
+  - `handlers/discord/stop.ts` — `executeStop` に ctx 引き継ぎ (`runStopWorkflow` 呼び出しで渡す)
+  - `handlers/stop-workflow.ts` — `runStopWorkflow(env, ctx, game, opts)` に signature 拡張、`executeStopWorkflow` も同様、内部で `getAwsCredentials`
+  - `handlers/snapshot-retention.ts` — `handleSnapshotRetention(env, ctx)` signature 拡張、内部で `getAwsCredentials`
+  - `handlers/cleanup.ts` — `handleVolumeCleanup(env, ctx)` signature 拡張、内部で `getAwsCredentials`
+  - `handlers/admin.ts` — `handleAdminDockerStop(request, env, ctx)` signature 拡張、内部で `getAwsCredentials`
+- [x] **連鎖修正** (signature 変更の波及):
+  - `handlers/idle-fallback.ts` — `handleIdleFallback(env, ctx)` 拡張 (`runStopWorkflow` 呼ぶため)
+  - `handlers/sidecar/idle-detected.ts` — `runStopWorkflow` 呼び出しに ctx 追加
+  - `index.ts` — `scheduled()` で 3 cron handler すべてに ctx を渡す、`/admin/docker-stop` route も ctx 引き継ぎ
+- [x] **置換パターン** (採用):
   ```ts
   const credentials = await getAwsCredentials(env, ctx);
   const ec2 = new AwsApiClient({ region: env.AWS_REGION ?? 'ap-northeast-1', credentials });
   ```
-- [ ] **`ExecutionContext` 受取**: `getAwsCredentials` が `ctx.waitUntil` で KV write を fire-and-forget するため、各 handler の signature が ctx を受けることを確認。admin.ts は未受の可能性、必要なら追加
-- [ ] **同 invocation 内では credentials を 1 度取って渡しまわす** (start.ts は EC2 + SSM 両方使うため)
-- [ ] **テスト更新**: 既存 handler test の AWS mock を `getAwsCredentials` の return mock に差し替え (credentials 中身は意味なし、`AwsApiClient` が受けるだけ)
-- [ ] **staging で再受入テスト** (Step 4 のシナリオを通す)
+- [x] **`lib/aws/index.ts`** に `getAwsCredentials` / `OidcCredentialError` を re-export 追加 (import パス統一)
+- [x] **同 invocation 内 1 callsite = 1 credentials 取得**。`getAwsCredentials` は in-flight dedup + KV cache 経由なので重複呼び出ししても STS は 1 回しか叩かないが、明示的に 1 度取って AwsApiClient に渡す pattern を踏襲 (`start.ts` は EC2 + SSM を同じ credentials で使うのでなおさら)
+- [x] **テスト更新不要**: handler レベルの integration test は存在せず (test 対象は decideIdleAction / postDiscordWebhookMessage / shouldNotify などの pure / mockable な lib のみ)、signature 変更の波及テスト修正は無し
+- [x] **`grep env.AWS_ACCESS_KEY_ID`** で `credentials.ts` の static 経路のみが hit することを確認 (= 移行漏れ無し、Step 7 で削除予定箇所と一致)
+- [x] **`pnpm typecheck` / `pnpm test` (118/118) / `pnpm build` (239 KiB 系列)** 通過
+- [-] **staging で再受入テスト**: ~~Step 4~~ skip 確定のため、改 Step 6 (3 段階リハーサル) で兼ねる
 
-Worker コード変更: **あり (全 callsite)**。Infra 変更: なし。
+Worker コード変更: **あり (全 callsite + 連鎖 = 9 ファイル + lib/aws/index.ts re-export)**。Infra 変更: なし。**Step 5 完了 (2026-05-24)**。
 
-### Step 6: 本番 cutover + 2-3 日観察
+### Step 6: 本番 cutover (3 段階リハーサル) + 2-3 日観察
 
-`AWS_AUTH_MODE = oidc` で本番切り替え、平日/週末両方を見れるよう 2-3 日観察。
+> **rev7 (2026-05-24)**: Step 4 スキップに伴い、本 Step を **3 段階リハーサル (Phase A 副作用ゼロ / Phase B 実起動 / Phase C rollback 試行)** に強化。検証用 Discord ギルド = 本番 Worker への切替を staging cutover の代替として扱う。
 
-- [ ] **本番 `wrangler.toml [vars]` 更新**:
-  - `AWS_OIDC_ROLE_ARN = "<gs-worker-oidc-role の ARN>"` (vars)
-  - `AWS_AUTH_MODE` は **まだ未設定** (= static、現状維持)
-- [ ] **本番 secret 投入**:
-  - `wrangler secret put OIDC_PRIVATE_KEYS_JWK` (本番用、Step 1.5 で投入済の場合スキップ)
+#### Step 6.0: 事前準備 (deploy 前)
+
+- [ ] **本番 secret 投入** (Step 1.5 で `OIDC_PRIVATE_KEYS_JWK` 投入済、Step 2 で `OIDC_SUB` 投入済の場合スキップ):
+  - `wrangler secret put OIDC_PRIVATE_KEYS_JWK` (本番用)
   - `wrangler secret put OIDC_SUB` (`discord-handler-<8 文字 random>`、決定13)
+- [ ] **本番 `wrangler.toml [vars]` 更新** (まだ static のまま):
+  - `AWS_OIDC_ROLE_ARN = "arn:aws:iam::123456789012:role/gs-worker-oidc-role"` (vars)
+  - `AWS_AUTH_MODE` は **まだ未設定** (= static、現状維持)
 - [ ] **`pnpm wrangler deploy`** で本番更新 (mode は static のまま、変化なし回帰確認)
-- [ ] **`AWS_AUTH_MODE = "oidc"` に切り替え**:
-  - `wrangler.toml [vars]` を編集して `pnpm wrangler deploy`
-  - 直後に `/list` を試す (副作用なし)、続けて `/status`、ATM11 `/start` → `/stop`
-  - `wrangler tail` で STS 呼び出し / KV cache hit ratio / 短期 credentials の expiration を観察
-- [ ] **Cron 経路の確認**: 5 分経過で `snapshot-retention` / `cleanup` cron、ATM11 起動中なら `idle-fallback` も `wrangler tail` で観察
-- [ ] **2-3 日観察項目チェックリスト**:
-  - [ ] Discord channel に新規エラー通知ゼロ
-  - [ ] `/start` `/stop` `/status` `/list` 各 1 回以上成功 (週末を跨ぐ)
-  - [ ] cron が 3 周期以上完走 (snapshot-retention / cleanup / idle-fallback)
-  - [ ] STS API 呼び出し回数が想定通り (1h あたり数回、cron 5min ごとの cache hit を確認)
-  - [ ] JWKS thumbprint 監視 cron が 1 回以上動作し OK 結果
-- [ ] **rollback 手順** (失敗時、Step 7 削除前のみ有効):
-  - `wrangler.toml [vars]` で `AWS_AUTH_MODE` を削除 or `"static"` に
-  - `pnpm wrangler deploy` で即時反映
-  - 旧 Access Key はまだ Inactive 化していないので static credentials がそのまま動く
+- [ ] **検証ギルドで `/list` 1 回** 動作確認 (= 回帰なし、ここで失敗すれば AWS_OIDC_ROLE_ARN 追加経路自体に問題あり)
+
+#### Step 6.A: Phase A — 副作用ゼロ確認 (oidc mode 切替直後)
+
+- [ ] **`AWS_AUTH_MODE = "oidc"` に切り替え** ([vars] 編集 + `pnpm wrangler deploy`)
+- [ ] **`wrangler tail` を開始**
+- [ ] 検証ギルドで以下を順に試行 (= EC2 起動を伴わない describe 系のみ):
+  - `/list` (KV `GAME_REGISTRY` 経由、AWS 呼び出し無しのため OIDC 経路には乗らない = 起点確認)
+  - `/status` (= `ec2:DescribeInstances` のみ、OIDC credentials の最初の本物利用)
+- [ ] **`wrangler tail` で確認** (各 1 件以上 observable):
+  - STS `AssumeRoleWithWebIdentity` 呼び出しが発生
+  - 短期 credentials の `expiration` が +900s
+  - 2 回目の `/status` で KV cache hit になり STS が呼ばれない (cache hit ratio が正しく上がる)
+- [ ] **失敗時の即時 rollback** (Phase B には進まず Step 6.D で復帰)
+
+#### Step 6.B: Phase B — 実起動確認 (1 サイクル)
+
+- [ ] ATM11 で `/start` → ready 通知到達まで待機
+- [ ] `wrangler tail` で `ec2:RunInstances` / `ssm:SendCommand` / `ec2:DescribeInstances` が新 policy + 短期 credentials で成功することを観察
+- [ ] サーバー接続テスト (Minecraft client から接続 1 回 = port + DNS 健全性)
+- [ ] `/stop` → snapshot 完成 + volume cleanup まで観察 (cleanup cron は 5 min 後)
+- [ ] **失敗時の即時 rollback** (Step 6.D)
+
+#### Step 6.C: Phase C — cron + rollback 経路の確認
+
+- [ ] **cron 経路**: ATM11 停止後 5〜10 min 待機し、`snapshot-retention` / `cleanup` cron が短期 credentials で完走することを `wrangler tail` で確認
+- [ ] **rollback 経路の試行** (任意、自信が無ければ実施):
+  - `AWS_AUTH_MODE` を `[vars]` から削除 + `pnpm wrangler deploy` (static 経路即時復帰)
+  - `/status` で static creds 経路が動くことを確認
+  - `AWS_AUTH_MODE = "oidc"` に再度戻して deploy (元に戻す)
+  - **狙い**: Step 7 削除前なら rollback パスが live であることを実証 (Step 7 後は不可)
+
+#### Step 6.D: 失敗時の rollback (Phase A / B 中の異常用)
+
+- [ ] `wrangler.toml [vars]` で `AWS_AUTH_MODE` を削除 (or `"static"`)
+- [ ] `pnpm wrangler deploy` で即時反映
+- [ ] 旧 Access Key はまだ Inactive 化していないので static credentials がそのまま動く
+- [ ] エラー内容を `wrangler tail` ログ + Discord `oidc-credential-fail` 通知から特定
+- [ ] 修正 → Phase A から再リハーサル
+
+#### Step 6.E: 2-3 日観察 (Phase A〜C 通過後)
+
+平日/週末両方を見れるよう **最低 48h** 観察。
+
+- [ ] Discord channel に新規 `oidc-credential-fail` / `oidc-cache-kv-put-fail` 通知ゼロ
+- [ ] `/start` `/stop` `/status` `/list` 各 1 回以上成功 (週末を跨ぐ)
+- [ ] cron が 3 周期以上完走 (snapshot-retention / cleanup / idle-fallback、ATM11 起動中のみ後者)
+- [ ] STS API 呼び出し回数が想定通り (1h あたり数回、cron 5 min ごとに 1 回程度の cache hit を確認)
 
 Worker コード変更: なし (deploy のみ)。Infra 変更: なし。
 

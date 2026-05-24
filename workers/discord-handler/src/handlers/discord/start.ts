@@ -8,6 +8,7 @@
 import {
   AwsApiClient,
   describeInstancesByTag,
+  getAwsCredentials,
   getLatestCompletedSnapshot,
   getLatestSnapshot,
   runInstances,
@@ -47,7 +48,7 @@ export async function handleStartCommand(
   }
 
   // 重い処理は waitUntil で後追い。Discord には先に deferred response を返す。
-  ctx.waitUntil(executeStart(game, interaction, env));
+  ctx.waitUntil(executeStart(game, interaction, env, ctx));
 
   return Response.json({
     type: InteractionResponseType.DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE,
@@ -64,6 +65,7 @@ async function executeStart(
   game: GameDefinition,
   interaction: Interaction,
   env: Env,
+  ctx: ExecutionContext,
 ): Promise<void> {
   const followUp = new DiscordFollowUpClient({
     applicationId: env.DISCORD_APPLICATION_ID,
@@ -72,12 +74,10 @@ async function executeStart(
 
   const gameId = game.game_id;
 
+  const credentials = await getAwsCredentials(env, ctx);
   const ec2 = new AwsApiClient({
     region: env.AWS_REGION ?? 'ap-northeast-1',
-    credentials: {
-      accessKeyId: env.AWS_ACCESS_KEY_ID,
-      secretAccessKey: env.AWS_SECRET_ACCESS_KEY,
-    },
+    credentials,
   });
   const cf = new CloudflareDnsClient({ apiToken: env.CLOUDFLARE_DNS_API_TOKEN });
 

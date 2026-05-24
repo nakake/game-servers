@@ -6,6 +6,7 @@
 import {
   AwsApiClient,
   describeInstancesByTag,
+  getAwsCredentials,
 } from '../../lib/aws/index.js';
 import { DiscordFollowUpClient } from '../../lib/discord/follow-up.js';
 import {
@@ -21,25 +22,27 @@ export function handleStatusCommand(
 ): Response {
   // Discord 3 秒制約があるので、AWS API 呼び出しが間に合う保証はない。
   // 念のため deferred response で返し、結果は follow-up で。
-  ctx.waitUntil(executeStatus(interaction, env));
+  ctx.waitUntil(executeStatus(interaction, env, ctx));
   return Response.json({
     type: InteractionResponseType.DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE,
     data: { content: '🔍 状態を確認中…' },
   });
 }
 
-async function executeStatus(interaction: Interaction, env: Env): Promise<void> {
+async function executeStatus(
+  interaction: Interaction,
+  env: Env,
+  ctx: ExecutionContext,
+): Promise<void> {
   const followUp = new DiscordFollowUpClient({
     applicationId: env.DISCORD_APPLICATION_ID,
     interactionToken: interaction.token,
   });
 
+  const credentials = await getAwsCredentials(env, ctx);
   const ec2 = new AwsApiClient({
     region: env.AWS_REGION ?? 'ap-northeast-1',
-    credentials: {
-      accessKeyId: env.AWS_ACCESS_KEY_ID,
-      secretAccessKey: env.AWS_SECRET_ACCESS_KEY,
-    },
+    credentials,
   });
 
   try {

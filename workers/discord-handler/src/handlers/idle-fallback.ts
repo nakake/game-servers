@@ -63,7 +63,10 @@ export interface IdleFallbackOutcome {
   stopOutcome?: unknown;
 }
 
-export async function handleIdleFallback(env: Env): Promise<IdleFallbackOutcome[]> {
+export async function handleIdleFallback(
+  env: Env,
+  ctx: ExecutionContext,
+): Promise<IdleFallbackOutcome[]> {
   const now = Date.now();
   const games = await listGames(env.GAME_REGISTRY);
   const outcomes: IdleFallbackOutcome[] = [];
@@ -89,7 +92,7 @@ export async function handleIdleFallback(env: Env): Promise<IdleFallbackOutcome[
       `[idle-fallback] ${game.game_id} silent for ${Math.round(decision.elapsedMs / 60_000)} min ` +
         `(threshold ${Math.round(decision.thresholdMs / 60_000)} min). forcing stop.`,
     );
-    const stopOutcome = await runStopWorkflow(env, game, {
+    const stopOutcome = await runStopWorkflow(env, ctx, game, {
       triggeredBy: 'cron-fallback',
       expectedInstanceId: decision.expectedInstanceId,
     });
