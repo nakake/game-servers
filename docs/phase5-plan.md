@@ -296,34 +296,26 @@ Worker コード変更: なし。Infra 変更: **あり**。
 
 `lib/aws/credentials.ts` を新設、`AwsApiClient` 構築の前段で credentials を取得する 1 関数に集約。
 
-- [ ] **`lib/aws/credentials.ts`**:
-  - `getAwsCredentials(env, ctx): Promise<AwsCredentials>` の動作:
-    1. `env.AWS_AUTH_MODE !== 'oidc'` → 従来の static credentials を即返す (後方互換)
-    2. **in-flight Promise dedup**: module-scope `Map<string, Promise<...>>` で同 invocation 内の同時呼び出しを 1 本化。**`.finally(() => map.delete(key))` で必ず Map から削除** (Promise reject 時の残留で永久 dedup を防ぐ)
-    3. KV `SERVER_STATE` の `aws-creds:cache` を読み、`expiration > now + 60s` なら返す
-    4. miss → `signOidcToken(env, {sub: env.OIDC_SUB, aud: 'sts.amazonaws.com', ttlSeconds: 60})`
-    5. STS regional endpoint (`https://sts.<region>.amazonaws.com/`) に Query Protocol で `AssumeRoleWithWebIdentity` POST、`DurationSeconds=900` を指定 (Role 側 `max_session_duration=3600` の上限内で 15min session を要求)
-    6. XML レスポンスから `AccessKeyId` / `SecretAccessKey` / `SessionToken` / `Expiration` を抽出
-    7. KV `aws-creds:cache` に put、TTL = `(expiration - now - 60) - Math.random() * 30` (**負方向 jitter のみ**、決定4)
-    8. ctx.waitUntil で KV write は fire-and-forget、credentials は即 return
-  - エラーハンドリング: STS error は `<ErrorResponse><Error><Code>` のみ抽出。`<Message>` はログのみ、Discord 通知には **code と HTTP status だけ** 流す (ARN/account ID をエコーするケースを遮断)
-  - 失敗は `OidcCredentialError(code, status)` を throw、呼び出し側で Discord に通知する場合は code のみ。**`AWS_AUTH_MODE = "oidc"` の場合は絶対に static credentials に fallback しない** (fallback すると OIDC 化の意味が消える)
-  - JWT は **どこにも log 出力しない**。`signOidcToken` の戻り値は `{ token: string }` の opaque object でなく **直接 string return** だが、`console.log` 等で出力する箇所を作らないことを test で担保
-  - **KV put 失敗時の挙動**: credentials は呼び出し側に return しつつ、`ctx.waitUntil` で Phase 4 の `postDiscordWebhookMessage` で「OIDC cache put 失敗」を 1 時間 1 回まで通知 (`notif-suppress` で抑制)。silent degradation を防ぐ
-  - **STS failure sentinel** (rev5 で追加役割): `OidcCredentialError` を throw する経路はすべて Phase 4 webhook に流す (1h 1 回 suppress + code/status のみ)。thumbprint mismatch / sub 不一致 / JWKS 不到達 / aud 違反など、OIDC 経路全般の異常をこの 1 経路で検知 = 別途 thumbprint 監視 cron を持たない理由
-- [ ] **テスト** `lib/aws/credentials.test.ts`:
-  - `AWS_AUTH_MODE = static` で KV / STS を呼ばずに即 return
-  - cache hit / miss / 期限切れ近接の各ケース
-  - STS XML レスポンスのパース (正常 / Error)
-  - KV put 失敗時に credentials は返す (cron 本体は止めない) + Discord 通知が 1 時間 1 回まで発火
-  - 同 invocation 内で並列 5 呼び出し → JWT 発行 / STS 呼び出しが 1 回のみ (in-flight dedup)
-  - **in-flight Promise reject 後、再度呼び出すと map が空で 2 回目の STS 試行ができること** (finally による Map cleanup の担保)
-  - STS error の場合、Discord に流せるエラーメッセージに ARN/account ID が含まれない
-  - **`AWS_AUTH_MODE = "oidc"` で STS error 時に static credentials へ fallback しないこと** (`OidcCredentialError` を throw)
-  - **KV jitter が負方向のみ** (= `expiration - now - 60` 以下) であること、TTL 計算結果が常に正であること
-- [ ] **`pnpm typecheck` / `pnpm test` / `pnpm build`**
+- [x] **`lib/aws/credentials.ts`** (2026-05-24): 全 8 動作要件を実装。
+  - `getAwsCredentials(env, ctx)` の動作: AWS_AUTH_MODE !== 'oidc' で static 即 return → in-flight Promise dedup (IIFE finally で Map cleanup 保証) → KV cache (`aws-creds:cache`、残 60s 以内は expired 扱い) → `issueStsWebIdentityToken` → STS regional (`sts.ap-northeast-1.amazonaws.com`) で `AssumeRoleWithWebIdentity` POST `DurationSeconds=900` → XML 抽出 → KV put `expirationTtl = max(60, expiration - now - 60 - random(0..30))` (**負方向 jitter のみ**、決定4) を `ctx.waitUntil` で背景化
+  - エラーハンドリング: STS error の `<Code>` のみ抽出、`<Message>` / `<RequestId>` (ARN / account ID をエコーする) は捨てる。code + HTTP status だけ Discord へ。`OidcCredentialError(code, status)` を throw、`AWS_AUTH_MODE = "oidc"` で絶対 static fallback しない
+  - JWT は本実装で一切 log / 通知に出さない (`issueStsWebIdentityToken` の戻り値を console / postDiscordWebhookMessage に渡す箇所が存在しないことを grep + test で担保)
+  - **KV put 失敗時**: credentials は return しつつ `ctx.waitUntil` で Discord 通知 1h 1 回 (`notif-suppress: oidc-cache-kv-put-fail`)
+  - **STS failure sentinel**: 全 `OidcCredentialError` 経路で Discord 通知 1h 1 回 (`notif-suppress: oidc-credential-fail`)、code + status のみ
+- [x] **テスト** `lib/aws/credentials.test.ts` (2026-05-24、14/14 通過): 全 9 要件カバー
+  - static mode (AWS_AUTH_MODE 未設定 / 'static'): KV / STS / JWT を一切呼ばないことを assert
+  - cache hit (expiration > now + 60s) / cache miss / 期限切れ近接 (残 30s で expired 扱い再取得)
+  - STS XML レスポンス parse: 正常 / 4xx (AccessDenied) / network 失敗 / JWT 発行失敗 / RoleArn 未設定
+  - KV put 失敗: credentials は return + Discord 通知 1 回
+  - 並列 5 呼び出し: JWT 1 回 / STS fetch 1 回 (in-flight dedup)
+  - in-flight reject 後の Map cleanup: 2 回目 STS 試行成功
+  - STS error の Discord 通知に ARN / account ID / `arn:aws:iam` が含まれない (negative match)
+  - oidc mode で STS error → `OidcCredentialError` throw、static creds に fallback しない
+  - jitter 負方向: TTL <= (expiration - now - 60)、常に 60 以上、50 サンプル中 jitter が効いていることも確認
+  - 1h suppress: STS 連続失敗 2 回中通知 1 回のみ
+- [x] **`pnpm typecheck` / `pnpm test` (118/118 = 既存 104 + credentials 14) / `pnpm build` (239.21 KiB)** 通過
 
-Worker コード変更: **あり (新 module)**。Infra 変更: なし。
+Worker コード変更: **あり (新 module + 全 14 テスト)**。Infra 変更: なし。**Step 3 完了 (2026-05-24)**。
 
 ### Step 4: Staging Worker セットアップと受入テスト
 
