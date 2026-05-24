@@ -32,13 +32,15 @@ WORKER_PUBLIC_URL = "https://discord-handler.<your-account>.workers.dev"
 # vars 配置で OK (漏れても sub/aud condition で守られる、phase5-plan.md 決定6)。
 AWS_OIDC_ROLE_ARN = "arn:aws:iam::123456789012:role/gs-worker-oidc-role"
 #
-# AWS_AUTH_MODE は Step 6.0 時点では **未設定 = 'static'** (= 既存 IAM Access Key 経路維持)。
-# Step 6.A で "oidc" に切り替えて段階リハーサル → Step 7 cutover 完了で env から削除。
-# 切替手順:
-#   1. 以下行のコメントを外して `AWS_AUTH_MODE = "oidc"` にして deploy → Phase A 副作用ゼロ検証
-#   2. /list /status が通ったら Phase B (ATM11 で /start /stop 1 サイクル)
-#   3. rollback したい場合はこの行を再度コメントアウトして deploy で即時 static 復帰
-# AWS_AUTH_MODE = "oidc"
+# Phase 5 Step 6.A〜C リハーサル中: OIDC 経路を有効化。
+# Worker は AssumeRoleWithWebIdentity で 15min 短期 credentials を取得し、AWS API を叩く。
+# 旧 AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY secret は Step 7 (24h 観察後) で削除予定。
+#
+# 失敗時 rollback (Phase A〜C の途中で問題発生):
+#   1. 以下行を `# AWS_AUTH_MODE = "oidc"` にコメントアウト (or 行ごと削除)
+#   2. `pnpm wrangler deploy` で static 経路に即時復帰
+#   3. 旧 Access Key は Step 7 まで Inactive 化していないので静的経路がそのまま動く
+AWS_AUTH_MODE = "oidc"
 
 # ---- SERVER_STATE KV ----
 # 2 用途で使う:
