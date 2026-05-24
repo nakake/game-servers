@@ -40,7 +40,7 @@ AWS_OIDC_ROLE_ARN = "arn:aws:iam::123456789012:role/gs-worker-oidc-role"
 #   1. 以下行を `# AWS_AUTH_MODE = "oidc"` にコメントアウト (or 行ごと削除)
 #   2. `pnpm wrangler deploy` で static 経路に即時復帰
 #   3. 旧 Access Key は Step 7 まで Inactive 化していないので静的経路がそのまま動く
-AWS_AUTH_MODE = "oidc"
+# AWS_AUTH_MODE = "oidc"  # Step 6.A rehearsal: rollback while fixing RequestTag/Env policy edge case
 
 # ---- SERVER_STATE KV ----
 # 2 用途で使う:
