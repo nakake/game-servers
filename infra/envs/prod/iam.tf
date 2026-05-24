@@ -67,100 +67,17 @@ resource "aws_iam_role_policy" "ec2_sns_publish" {
 }
 
 # ===========================================================================
-# Worker 呼び出し用 IAM user: gs-worker-caller
-# ===========================================================================
-# Phase 5 (docs/phase5-plan.md) で OIDC + AssumeRoleWithWebIdentity に移行中。
-# Step 2 (現在): 新 OIDC role を並走で作成、user 側はまだ残す (rollback 余地)。
-# Step 7 (cutover 後 24h): Access Key + user + policy を削除、user 側を完全廃止する。
-# 既存 Access Key (AKIA...JCUVJ74) は IaC 管理外、Step 7 で AWS CLI 経由で削除する。
-
-resource "aws_iam_user" "gs_worker_caller" {
-  name = "gs-worker-caller"
-}
-
-# Worker が EC2 / EBS / SSM を操作するためのカスタマー管理ポリシー。
-# 元は runbook-phase1-production.md §3.0 で手動作成・編集したもの。
-data "aws_iam_policy_document" "gs_worker_caller" {
-  statement {
-    sid       = "SsmSendCommandToTaggedInstances"
-    effect    = "Allow"
-    actions   = ["ssm:SendCommand"]
-    resources = ["arn:aws:ec2:${var.aws_region}:*:instance/*"]
-
-    condition {
-      test     = "StringEquals"
-      variable = "aws:ResourceTag/Project"
-      values   = ["game-servers"]
-    }
-  }
-
-  statement {
-    sid       = "SsmSendCommandWithDocument"
-    effect    = "Allow"
-    actions   = ["ssm:SendCommand"]
-    resources = ["arn:aws:ssm:${var.aws_region}::document/AWS-RunShellScript"]
-  }
-
-  statement {
-    sid       = "SsmGetCommandInvocation"
-    effect    = "Allow"
-    actions   = ["ssm:GetCommandInvocation"]
-    resources = ["*"]
-  }
-
-  statement {
-    sid     = "SsmAmiResolve"
-    effect  = "Allow"
-    actions = ["ssm:GetParameters", "ssm:GetParameter"]
-    resources = [
-      "arn:aws:ssm:*::parameter/aws/service/ami-amazon-linux-*",
-      "arn:aws:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:parameter/gs/*",
-    ]
-  }
-
-  statement {
-    sid    = "Ec2RunStopSnapshot"
-    effect = "Allow"
-    actions = [
-      "ec2:RunInstances",
-      "ec2:TerminateInstances",
-      "ec2:DescribeInstances",
-      "ec2:DescribeVolumes",
-      "ec2:DescribeSnapshots",
-      "ec2:CreateSnapshot",
-      # DeleteSnapshot は Cron の世代管理 (Worker handlers/snapshot-retention.ts) が
-      # generations を超えた古い game-world snapshot を消すために使う。DLM は Worker が
-      # 作る snapshot を管理できないため Worker 側で世代管理する (Step 6)。
-      "ec2:DeleteSnapshot",
-      "ec2:CreateTags",
-      "ec2:DeleteVolume",
-    ]
-    resources = ["*"]
-  }
-
-  statement {
-    sid       = "PassEc2InstanceRole"
-    effect    = "Allow"
-    actions   = ["iam:PassRole"]
-    resources = [aws_iam_role.gs_phase0_ec2.arn]
-
-    condition {
-      test     = "StringEquals"
-      variable = "iam:PassedToService"
-      values   = ["ec2.amazonaws.com"]
-    }
-  }
-}
-
-resource "aws_iam_policy" "gs_worker_caller" {
-  name   = "gs-worker-caller-policy"
-  policy = data.aws_iam_policy_document.gs_worker_caller.json
-}
-
-resource "aws_iam_user_policy_attachment" "gs_worker_caller" {
-  user       = aws_iam_user.gs_worker_caller.name
-  policy_arn = aws_iam_policy.gs_worker_caller.arn
-}
+# 旧 IAM user gs-worker-caller (Phase 1〜4 の Worker 呼び出し経路) は Phase 5 Step 7
+# (2026-05-24) で削除済。Worker は OIDC + AssumeRoleWithWebIdentity 経由で AWS API を
+# 叩く (下の module "worker_oidc" + aws_iam_policy.gs_worker_oidc)。
+# 復活させたい場合は git revert で参照: 削除 commit は本ファイルの履歴を辿る。
+#
+# 削除した resource:
+#   - aws_iam_user.gs_worker_caller
+#   - aws_iam_policy.gs_worker_caller (wildcard Resource = "*" 含む旧 user policy)
+#   - aws_iam_user_policy_attachment.gs_worker_caller
+#   - data.aws_iam_policy_document.gs_worker_caller
+# Access Key (AKIA...) は手動 (aws iam delete-access-key) で削除済。
 
 # ===========================================================================
 # Phase 5: Worker → AWS OIDC role
