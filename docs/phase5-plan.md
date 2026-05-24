@@ -154,68 +154,69 @@ Phase 5 で **やらない** (持ち越し):
 
 `workers/discord-handler/src/lib/auth/oidc-issuer.ts` を新設、JWT 発行 + JWKS 公開を実装。
 
-- [ ] **鍵ペア生成スクリプト** `scripts/generate-oidc-keypair.mjs`:
+- [x] **鍵ペア生成スクリプト** `scripts/generate-oidc-keypair.mjs` (commit f8e951c):
   - `crypto.subtle.generateKey({name: 'RSASSA-PKCS1-v1_5', modulusLength: 2048, hash: 'SHA-256'}, true, ['sign','verify'])` で RSA-2048 生成
-  - 既存 `OIDC_PRIVATE_KEYS_JWK` (配列の JSON 文字列) を受け取り、**末尾追加** モードで出力 (rotation 用 `--rotate` フラグ)
+  - 既存 `OIDC_PRIVATE_KEYS_JWK` (配列の JSON 文字列) を受け取り、**末尾追加** モードで出力 (rotation 用 `--rotate` フラグ) + `--fresh` / `--remove-old` も実装
   - 各 JWK には `kid = crypto.randomUUID()`、`iat`-like `created_at` (UNIX seconds) も付与
-  - 投入手順 (`wrangler secret put OIDC_PRIVATE_KEYS_JWK`) を stdout に出す
-- [ ] **`env.ts` 拡張**:
-  - `OIDC_PRIVATE_KEYS_JWK: string` (Secret、`{"keys":[{kid, ...}, ...]}` の JSON 文字列)
-  - `OIDC_SUB: string` (**Secret**、`discord-handler-<8 文字 random>` 形式。決定13)
-  - `AWS_OIDC_ROLE_ARN: string` (vars、AssumeRole 先)
+  - 投入手順 (`wrangler secret put OIDC_PRIVATE_KEYS_JWK`) を stderr に出す (stdout は JSON のみ)
+- [x] **`env.ts` 拡張** (commit f8e951c):
+  - `OIDC_PRIVATE_KEYS_JWK?: string` (Secret、`{"keys":[{kid, ...}, ...]}` の JSON 文字列)
+  - `OIDC_SUB?: string` (**Secret**、`discord-handler-<8 文字 random>` 形式。決定13)
+  - `AWS_OIDC_ROLE_ARN?: string` (vars、AssumeRole 先)
   - `AWS_AUTH_MODE?: 'static' | 'oidc'` (vars、未設定なら `'static'`)
-- [ ] **`lib/auth/oidc-issuer.ts`** (すべて internal、HTTP route として export 禁止):
-  - `loadPrivateKeys(env)`: JWK 配列 → `Array<{kid, key: CryptoKey, createdAt}>`、module-scope cache (isolate 内 1 度のみ)
-  - `signOidcToken(env, {sub, aud, ttlSeconds})`: **最新 `createdAt` の鍵で署名**。header `{alg:'RS256', kid, typ:'JWT'}`、payload `{iss, sub, aud, iat, nbf:iat, exp:iat+60, jti}`
-  - `buildJwks(env)`: 配列全件を `{kid, kty, n, e, use:'sig', alg:'RS256'}` で返す (rotation 中は新旧両方公開)
-  - `buildDiscoveryDocument(issuerUrl)`: 必須フィールドのみ
-- [ ] **`src/index.ts` route 追加** (**`/oidc/.well-known/*` のみ、`/oidc/sign` 等は絶対作らない**):
+- [x] **`lib/auth/oidc-issuer.ts`** (commit f8e951c、module-private 設計):
+  - `loadPrivateKeys(env)`: JWK 配列 → `Array<{kid, privateKey: CryptoKey, publicJwk, createdAt}>`、module-scope cache。`extractable=false` で再 export 不可
+  - `signOidcToken(env, {sub, aud, ttlSeconds})`: **module-private**、最新 `createdAt` の鍵で署名。header `{alg:'RS256', kid, typ:'JWT'}`、payload `{iss, sub, aud, iat, nbf:iat, exp:iat+60, jti}`
+  - `issueStsWebIdentityToken(env)`: 公開 entry、sub/aud/ttl を hardcode した STS 専用 wrapper
+  - `buildJwks(env)`: 配列全件を public 鍵のみで返す (rotation 中は新旧両方公開)
+  - `buildDiscoveryDocument(issuerUrl)` / `deriveIssuerUrl(env)`: 必須フィールドのみ
+- [x] **`src/index.ts` route 追加** (commit f8e951c、`/oidc/.well-known/*` のみ、`/oidc/sign` 等は無し):
   - `GET /oidc/.well-known/openid-configuration` → discovery doc JSON
   - `GET /oidc/.well-known/jwks.json` → JWKS JSON (配列)
   - 両者 `Cache-Control: public, max-age=3600, s-maxage=86400`
-- [ ] **テスト** `lib/auth/oidc-issuer.test.ts`:
+- [x] **テスト** `lib/auth/oidc-issuer.test.ts` (commit f8e951c、16 ケース全通過):
   - **`jose` を dev dependency に追加**、`jwtVerify` で署名検証成功
   - exp / iat / nbf / iss / sub / aud / jti の値検証
   - JWKS が public 鍵のみで private を漏らさない
   - kid が JWT header / JWKS で一致
   - **multi-kid シナリオ**: 2 鍵入りの env で、署名は新鍵、JWKS は両鍵を返す
-  - `signOidcToken` が module export されていないこと (import 試験で型エラー)
-  - **jti が呼び出し毎に新規生成されていること** (3 連続呼び出しで全て異なる UUID、Cron で固定するバグを test で禁止)
-- [ ] **`package.json` 更新**: `jose` を `devDependencies` に追加
-- [ ] **`pnpm typecheck` / `pnpm test` / `pnpm build`** 通過
+  - `signOidcToken` が module export されていないこと (runtime 担保)
+  - **jti が呼び出し毎に新規生成されていること** (3 連続呼び出しで全て異なる UUID)
+- [x] **`package.json` 更新**: `jose` を `devDependencies` に追加 (5.10.0)
+- [x] **`pnpm typecheck` / `pnpm test` (104/104) / `pnpm build` (239.16 KiB)** 通過
 
-Worker コード変更: **あり**。AWS 変更: なし。
+Worker コード変更: **あり**。AWS 変更: なし。**Step 1 完了 (commit f8e951c, 2026-05-24)**。
 
 ### Step 1.5: 確定 issuer URL 取得 (空 OIDC route 付き先行 deploy)
 
 Step 2 の Terraform で `worker_issuer_url` を確定値で書きたいので、Step 1 で実装した route を 1 度本番 deploy する。
 
-- [ ] **`OIDC_PRIVATE_KEYS_JWK` を本番 secret に投入** (Step 1 のスクリプト出力)
-- [ ] **`pnpm wrangler deploy`** で本番 Worker を更新
-- [ ] **`curl https://discord-handler.<account>.workers.dev/oidc/.well-known/jwks.json`** が 200 + JWKS JSON を返す
-- [ ] **`curl https://.../oidc/.well-known/openid-configuration`** が 200 + discovery doc を返す
-- [ ] **issuer URL を確定**: `https://discord-handler.<account>.workers.dev/oidc`
+- [x] **`OIDC_PRIVATE_KEYS_JWK` を本番 secret に投入** (Step 1 のスクリプト出力)
+- [x] **`pnpm wrangler deploy`** で本番 Worker を更新
+- [x] **`curl https://discord-handler.<your-account>.workers.dev/oidc/.well-known/jwks.json`** が 200 + JWKS JSON を返す
+- [x] **`curl https://discord-handler.<your-account>.workers.dev/oidc/.well-known/openid-configuration`** が 200 + discovery doc を返す
+- [x] **issuer URL 確定**: `https://discord-handler.<your-account>.workers.dev/oidc`
 - [-] **Cloudflare WAF rate limit は本 Phase では設定しない (rev4 で skip 確定)**。理由: **`*.workers.dev` には WAF / Rate Limiting Rules を適用できない** (Cloudflare 所有 zone のため、自前ドメインの zone WAF と違って dashboard 設定不可)。代替は (a) Workers Rate Limiting API binding か (b) 独自ドメイン化 + zone WAF だが、(a) は AWS STS の IP allowlist 追加実装で複雑化、(b) は決定 7 (workers.dev 固定) 破棄 + OIDC provider 完全再作成で重い。**主防御は edge cache (`s-maxage=86400`) で吸収**し、本格 DoS の兆候が出たら案 (a) を発動する方針 (Step 8 runbook に手順を残す)
-- [ ] この時点では AWS 側未設定なので Worker は依然 static credentials 経路で動く
+- [x] この時点では AWS 側未設定なので Worker は依然 static credentials 経路で動作 (回帰なし確認済)
 
-Worker コード変更: なし (deploy のみ)。
+Worker コード変更: なし (deploy のみ)。**Step 1.5 完了 (2026-05-24)**。
 
 ### Step 2: AWS 側 OIDC 信頼関係を Terraform で構築
 
 `infra/modules/aws-oidc-cloudflare/` を新設、OIDC provider + Role を IaC 化。
 
-- [ ] **モジュール構成**:
+- [x] **モジュール構成** (commit b11a5af):
   ```
   infra/modules/aws-oidc-cloudflare/
   ├─ main.tf       # aws_iam_openid_connect_provider + aws_iam_role
-  ├─ variables.tf  # worker_issuer_url, expected_sub, max_session_duration
-  ├─ outputs.tf    # role_arn, oidc_provider_arn
-  └─ README.md     # モジュール責務、thumbprint 取得手順
+  ├─ variables.tf  # worker_issuer_url, expected_sub, max_session_duration, thumbprints, role_name
+  ├─ outputs.tf    # role_arn, role_name, oidc_provider_arn, oidc_provider_url
+  └─ README.md     # モジュール責務、thumbprint 取得手順、緊急 rotation 手順
   ```
-- [ ] **`aws_iam_openid_connect_provider`**:
-  - `url = var.worker_issuer_url` (Step 1.5 で確定済)
+- [x] **`aws_iam_openid_connect_provider`** (apply 済):
+  - `url = "https://discord-handler.<your-account>.workers.dev/oidc"`
   - `client_id_list = ["sts.amazonaws.com"]`
-  - `thumbprint_list = ["..."]` — `scripts/get-cf-thumbprint.sh` で `openssl s_client -showcerts -connect <host>:443 < /dev/null | openssl x509 -fingerprint -sha1 -noout` を実行して取得 (現状の Cloudflare cert)
+  - `thumbprint_list`: 2 件 (intermediate + leaf) — `scripts/get-cf-thumbprint.ps1` で取得
 - [x] **`aws_iam_role` `gs-worker-oidc-role`** (apply 済):
   - assume_role_policy: Federated = OIDC provider ARN、Action = `sts:AssumeRoleWithWebIdentity`、Condition:
     ```
@@ -227,15 +228,15 @@ Worker コード変更: なし (deploy のみ)。
   - rev6 で iss / jti を削除。理由: AWS の OIDC custom provider は `<provider>:aud` と `<provider>:sub` のみを condition key として expose する。iss / jti を入れると StringEquals/StringLike が null 比較で必ず fail (= AccessDenied)。iss は AWS が provider URL 一致を暗黙的に検証、jti replay 防御は Worker 側 (Step 3 `oidc-jti:<jti>` KV TTL 70s self-defense) に一元化
   - `max_session_duration = 3600` (AWS API 最小、Role 側の上限値。実際の 15min session は Worker 側 STS 呼び出しの `DurationSeconds = 900` で指定)
 - [-] **JWKS thumbprint 監視** → **rev5 で Step 3 の STS failure sentinel に統合**。Worker fetch() は TLS cert thumbprint を expose しないため Worker 内では検証不可と判明。代わりに Step 3 の `getAwsCredentials` が STS error を捕捉 → Discord 通知する経路を sentinel として利用。手動 thumbprint チェック手順だけ runbook (Step 8) に残し、半期に 1 度任意で実行する
-- [ ] **`infra/envs/prod/iam.tf` 改修**:
+- [x] **`infra/envs/prod/iam.tf` 改修** (commit b11a5af):
   - 新 module `module "worker_oidc"` 呼び出し
   - 既存 `aws_iam_user.gs_worker_caller` および attachment は **残す** (Step 7 で剥がす)
-  - `output "worker_oidc_role_arn"` を追加
-- [ ] **terraform plan**: 「OIDC provider 1 個、Role 1 個 追加」のみであることを確認
-- [ ] **terraform apply は ユーザーが手元実行** (分類器がブロック、`terraform-aws-credential-bridge` メモ参照)
-- [ ] **AWS CLI 手動検証**: Step 1 で生成した private key で JWT を 1 個作成し、`aws sts assume-role-with-web-identity` が成功することを確認
+  - `output "worker_oidc_role_arn"` / `worker_oidc_provider_arn` を追加
+- [x] **terraform plan / apply** (ユーザー実行、2026-05-24):
+  - provider + role の 2 リソース apply 成功 (`arn:aws:iam::123456789012:role/gs-worker-oidc-role`)
+- [x] **AWS CLI 手動検証** (2026-05-24): `scripts/sign-test-jwt.mjs` 経由で JWT を発行し、`aws sts assume-role-with-web-identity` が `Credentials` を返す (15min session)。検証中に iss / jti condition key が AWS で未サポートと判明し rev6 で削除
 
-Worker コード変更: なし (rev5 で thumbprint cron 廃止、Step 3 の sentinel に統合)。Infra 変更: **あり**。
+Worker コード変更: なし (rev5 で thumbprint cron 廃止、Step 3 の sentinel に統合)。Infra 変更: **あり**。**Step 2 完了 (commit 9308f9d + b11a5af, 2026-05-24)**。
 
 ### Step 2.5: IAM policy tightening (least privilege 化)
 
