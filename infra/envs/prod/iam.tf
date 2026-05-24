@@ -268,25 +268,25 @@ data "aws_iam_policy_document" "gs_worker_oidc" {
   # RunInstances は複数 resource type に対して評価される (instance / volume / key-pair /
   # security-group / subnet / network-interface / launch-template / image)。
   #
-  # 当初は Resource = "*" + StringEqualsIfExists(aws:RequestTag/Env) で全 resource を 1 statement
-  # に統合する設計を試みたが、AWS の実装では non-taggable resource (key-pair 等) に対しては
-  # Resource = "*" の wildcard 自体が match せず、`UnauthorizedOperation: no identity-based
-  # policy allows ec2:RunInstances on resource: arn:aws:ec2:...:key-pair/...` が発生する。
-  # simulate-principal-policy でも同じ挙動を再現 (本番 ATM11 /start で 2026-05-24 観測)。
+  # AWS の policy evaluator は **`ec2:LaunchTemplate` / `ec2:InstanceType` / `aws:RequestTag/<key>`
+  # を instance resource の evaluation context にしか attach しない**。volume を含む全ての
+  # 他 resource type に対する evaluation では context が空のため、StringEquals / ArnEquals が
+  # null 比較で fail する (実 /start atm11 で 2026-05-24 に 3 回観測: key-pair / volume / 等)。
+  # simulate-principal-policy も同じ挙動を再現。
   #
-  # 対処: resource type を taggable / non-taggable で 2 statement に分割する:
-  #   - Ec2RunInstancesTaggable    : instance / volume を Resource として明示、Env=prod tag 必須
-  #   - Ec2RunInstancesNonTaggable : key-pair / security-group / subnet / network-interface /
-  #                                  launch-template / image を Resource として明示、tag 条件無し
-  # どちらの statement にも LaunchTemplate + InstanceType condition があるので、攻撃者が任意
-  # LT / 任意 type で起動できない = cryptojacking 抑止は維持。
+  # 対処: instance resource のみに condition を集約し、それ以外を無条件 allow。
+  # 攻撃面: attacker は同 RunInstances request の instance evaluation で必ず deny されるため、
+  # 他 resource が無条件 allow でも全体としては起動不可 (= cryptojacking 抑止維持)。
+  #
+  #   - Ec2RunInstancesInstance : instance/* のみ、LT + InstanceType + RequestTag/Env=prod 厳格
+  #   - Ec2RunInstancesSupport  : それ以外 (volume / key-pair / sg / subnet / eni / lt / image)
+  #                              無条件 allow (instance side が代理 cryptojacking 抑止)
   statement {
-    sid       = "Ec2RunInstancesTaggable"
+    sid       = "Ec2RunInstancesInstance"
     effect    = "Allow"
     actions   = ["ec2:RunInstances"]
     resources = [
       "arn:aws:ec2:${var.aws_region}:${data.aws_caller_identity.current.account_id}:instance/*",
-      "arn:aws:ec2:${var.aws_region}:${data.aws_caller_identity.current.account_id}:volume/*",
     ]
 
     condition {
@@ -301,33 +301,23 @@ data "aws_iam_policy_document" "gs_worker_oidc" {
       values   = var.worker_oidc_allowed_instance_types
     }
 
-    # 起動時に Env=prod tag を強制する条件。
-    #
-    # IfExists を使う理由: AWS の policy evaluator は `aws:RequestTag/Env` を
-    # **instance resource の evaluation context にしか attach しない** (実 RunInstances
-    # API で 2026-05-24 観測。Worker は volumeTags=[Env=prod] を正しく送っているにも関わらず
-    # volume context には request tag が現れず、StringEquals が null 比較で fail → deny)。
-    # IfExists で「context に tag があれば match、無ければ skip」にすることで volume の
-    # evaluation を pass させる。
-    #
-    # Env=prod 強制の構造的担保は本 condition 単独ではなく多層防御で維持:
-    #   1. LT (gs-game-server) の tag_specifications で instance/volume に必ず Env=prod 焼き付け
-    #   2. Worker (start.ts) は instanceTags/volumeTags の双方で Env=prod を冗長指定
-    #   3. ec2:CreateTags statement で aws:RequestTag/Project=game-servers + ec2:CreateAction を限定
-    #      (= 単独 CreateTags での Env tag 偽装を遮断)
-    # この 3 層により attacker が credentials 漏洩しても Env=prod 無し instance/volume は作れない。
+    # instance resource の TagSpecifications に Env=prod が含まれていることを強制 (start.ts
+    # instanceTags で渡される、Step 2.5.0 で対応済)。Volume 等の tag 強制は本 condition では
+    # 担保せず、LT tag_specifications + Worker volumeTags の冗長指定 + ec2:CreateTags 別 statement
+    # の多層防御で維持する。
     condition {
-      test     = "StringEqualsIfExists"
+      test     = "StringEquals"
       variable = "aws:RequestTag/Env"
       values   = ["prod"]
     }
   }
 
   statement {
-    sid       = "Ec2RunInstancesNonTaggable"
+    sid       = "Ec2RunInstancesSupport"
     effect    = "Allow"
     actions   = ["ec2:RunInstances"]
     resources = [
+      "arn:aws:ec2:${var.aws_region}:${data.aws_caller_identity.current.account_id}:volume/*",
       "arn:aws:ec2:${var.aws_region}:${data.aws_caller_identity.current.account_id}:key-pair/*",
       "arn:aws:ec2:${var.aws_region}:${data.aws_caller_identity.current.account_id}:security-group/*",
       "arn:aws:ec2:${var.aws_region}:${data.aws_caller_identity.current.account_id}:subnet/*",
@@ -336,19 +326,11 @@ data "aws_iam_policy_document" "gs_worker_oidc" {
       # image (AMI) は AWS のアカウントレス resource (Amazon 提供 / 共有 AMI 含む)
       "arn:aws:ec2:${var.aws_region}::image/*",
     ]
-    # condition 無し (= 無条件 allow)。理由:
-    #   - これらの resource type の evaluation context には ec2:LaunchTemplate /
-    #     ec2:InstanceType / aws:RequestTag/<key> が存在しない (実 RunInstances API で
-    #     2026-05-24 UnauthorizedOperation を 2 回踏んで判明: AWS の policy evaluator は
-    #     request-context key を「該当 resource type に attach されるもの」のみに limit する)。
-    #     StringEquals / ArnEquals は null 比較で必ず fail し UnauthorizedOperation になる。
-    #   - これらは「Worker が参照するだけの既存 resource」(key-pair, sg, subnet, eni,
-    #     launch-template) または AMI で、Worker が新規作成しない。account 共有なので
-    #     attacker が用意した resource を埋め込むことも不可。
-    #   - cryptojacking 抑止は instance resource を扱う Ec2RunInstancesTaggable 側で
-    #     LT + InstanceType + Env=prod 条件付き = 攻撃者は任意 LT / 任意 type で
-    #     instance を起動できない (= 本 statement に condition を付けても多層防御
-    #     としての価値はゼロ)。
+    # condition 無し。AWS は LT / InstanceType / RequestTag を instance resource にしか attach
+    # しないため、これらの statement に condition を付けると常に null 比較で fail する。
+    # 攻撃面の閉鎖は Ec2RunInstancesInstance 側で行う (同 request の instance evaluation が
+    # deny されれば、他 resource が allow でも RunInstances 全体は失敗 = 攻撃者は任意 LT /
+    # 任意 type / Env=prod 無しの instance を起動できない)。
   }
 
   # ---- EC2 TerminateInstances ----
