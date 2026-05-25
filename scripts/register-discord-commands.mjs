@@ -29,16 +29,24 @@ if (!isGlobal && !guildId) {
   process.exit(1);
 }
 
+// integration_types: [0] = Guild Install のみ。
+// Developer Portal で User Install も有効だと default で [0, 1] になり、
+// 同じ guild に user-app としても入れているユーザーには picker で 2 つずつ表示されてしまう。
+// game サーバー制御は guild 内でしか意味がないので guild 限定で固定する。
+const GUILD_INSTALL_ONLY = [0];
+
 const commands = [
   {
     name: 'list',
     description: '登録済み game サーバーの一覧を表示',
     type: 1, // CHAT_INPUT
+    integration_types: GUILD_INSTALL_ONLY,
   },
   {
     name: 'start',
     description: 'game サーバーを起動 (EBS snapshot から復元)',
     type: 1,
+    integration_types: GUILD_INSTALL_ONLY,
     options: [
       {
         name: 'game',
@@ -55,6 +63,7 @@ const commands = [
     name: 'stop',
     description: '起動中の game サーバーを停止 (snapshot 作成後 terminate)',
     type: 1,
+    integration_types: GUILD_INSTALL_ONLY,
     options: [
       {
         name: 'game',
@@ -69,6 +78,7 @@ const commands = [
     name: 'status',
     description: '現在 running な game サーバーの状態を表示',
     type: 1,
+    integration_types: GUILD_INSTALL_ONLY,
   },
 ];
 
