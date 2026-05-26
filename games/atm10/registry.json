@@ -1,0 +1,76 @@
+{
+  "game_id": "atm10",
+  "display_name": "All The Mods 10",
+  "category": "minecraft-modded",
+  "enabled": true,
+
+  "instance_types": [
+    "r7a.large",
+    "r6a.large",
+    "m7a.xlarge"
+  ],
+  "ebs_size_gb": 30,
+  "seed_snapshot_id": "<YOUR_SEED_SNAPSHOT_ID>",
+  "seed_modpack_s3_uri": "s3://gs-game-configs/atm10/modpack/server-pack.zip",
+  "spot_max_price_jpy_per_hour": 12,
+
+  "subdomain": "atm10",
+  "cf_record_id": "<YOUR_CF_RECORD_ID>",
+  "ports": [
+    { "port": 25565, "proto": "TCP" }
+  ],
+
+  "container_image": "itzg/minecraft-server:java21",
+  "container_image_note": "ATM10 = MC 1.21.1 / NeoForge 21.1.x = Java 21 で動くため itzg 公式 image を pull。modpack は seed_modpack_s3_uri 経由で user-data が初回起動時に /data に事前展開する (env.MODPACK は使わず、presigned URL の `&` HTML escape 問題を回避)。",
+  "image_source": "pull",
+  "env": {
+    "EULA": "TRUE",
+    "TYPE": "NEOFORGE",
+    "VERSION": "1.21.1",
+    "NEOFORGE_VERSION": "",
+    "MEMORY": "",
+    "USE_AIKAR_FLAGS": "false",
+    "JVM_XX_OPTS": "-Xms10G -Xmx10G -XX:+UseZGC -XX:+AlwaysPreTouch -XX:+DisableExplicitGC -XX:-OmitStackTraceInFastThrow -XX:+UnlockExperimentalVMOptions",
+    "OVERRIDE_SERVER_PROPERTIES": "true",
+    "VIEW_DISTANCE": "8",
+    "SIMULATION_DISTANCE": "5",
+    "DIFFICULTY": "easy",
+    "MAX_PLAYERS": "20",
+    "MOTD": "All the Mods 10",
+    "PAUSE_WHEN_EMPTY_SECONDS": "60",
+    "ENABLE_RCON": "true",
+    "RCON_PORT": "25575",
+    "RCON_PASSWORD_FROM_SSM": "/gs/atm10/rcon_password"
+  },
+
+  "config_s3_prefix": "s3://gs-game-configs/atm10/",
+
+  "idle_check": {
+    "type": "minecraft_rcon",
+    "timeout_min": 10,
+    "heartbeat_interval_sec": 60,
+    "config": {
+      "host": "localhost",
+      "port": 25575,
+      "password_source": "ssm:/gs/atm10/rcon_password",
+      "command": "list",
+      "empty_pattern": "There are 0 of a max"
+    }
+  },
+
+  "snapshot": {
+    "generations": 3,
+    "weekly_s3_backup": true,
+    "tags": {
+      "Project": "game-servers",
+      "Game": "atm10",
+      "Purpose": "game-world"
+    }
+  },
+
+  "discord": {
+    "start_message": "ATM10 を起動しています… (EC2 の確保に 1〜2 分)",
+    "ready_message": "サーバーの起動が完了しました",
+    "stop_message": "ATM10 を停止しました。次回起動まで世界は保存されています"
+  }
+}

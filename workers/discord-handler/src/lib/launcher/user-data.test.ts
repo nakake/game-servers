@@ -144,6 +144,61 @@ describe('buildUserData — formatBlankVolume', () => {
   });
 });
 
+describe('buildUserData — seed_modpack_s3_uri', () => {
+  it('downloads + unzips seed modpack only when formatBlankVolume=true AND uri set', () => {
+    const ud = buildUserData({
+      game: makeGame({
+        seed_modpack_s3_uri: 's3://gs-game-configs/atm11/modpack/server-pack.zip',
+      }),
+      ...BASE_OPTS,
+      formatBlankVolume: true,
+    });
+    expect(ud).toContain(
+      "aws s3 cp 's3://gs-game-configs/atm11/modpack/server-pack.zip' /tmp/modpack.zip",
+    );
+    expect(ud).toContain('unzip -q -o /tmp/modpack.zip -d /opt/atm11');
+    // 展開後に container uid に再 chown する (root 所有のまま container を起動すると writeback できない)
+    expect(ud).toContain('chown -R 1000:1000 /opt/atm11');
+    // dnf install に unzip が含まれていること (AL2023 base に無い)
+    expect(ud).toContain('dnf install -y docker unzip');
+  });
+
+  it('skips seed modpack when formatBlankVolume=false (snapshot restore path)', () => {
+    const ud = buildUserData({
+      game: makeGame({
+        seed_modpack_s3_uri: 's3://gs-game-configs/atm11/modpack/server-pack.zip',
+      }),
+      ...BASE_OPTS,
+      formatBlankVolume: false,
+    });
+    // launcher tarball の `aws s3 cp` (build mode の既存処理) と区別するため、
+    // modpack 専用 URI / 出力先で assert する。
+    expect(ud).not.toContain('modpack/server-pack.zip');
+    expect(ud).not.toContain('/tmp/modpack.zip');
+    expect(ud).toContain('no seed modpack to apply');
+  });
+
+  it('skips seed modpack when uri is not set', () => {
+    const ud = buildUserData({
+      game: makeGame({ seed_modpack_s3_uri: undefined }),
+      ...BASE_OPTS,
+      formatBlankVolume: true,
+    });
+    expect(ud).not.toContain('/tmp/modpack.zip');
+    expect(ud).toContain('no seed modpack to apply');
+  });
+
+  it('skips seed modpack when uri is empty string (disabled)', () => {
+    const ud = buildUserData({
+      game: makeGame({ seed_modpack_s3_uri: '' }),
+      ...BASE_OPTS,
+      formatBlankVolume: true,
+    });
+    expect(ud).not.toContain('/tmp/modpack.zip');
+    expect(ud).toContain('no seed modpack to apply');
+  });
+});
+
 describe('buildUserData — RCON / SNS optional sections', () => {
   it('fetches RCON password from SSM when registry has RCON_PASSWORD_FROM_SSM', () => {
     const ud = buildUserData({ game: makeGame(), ...BASE_OPTS });
@@ -152,7 +207,28 @@ describe('buildUserData — RCON / SNS optional sections', () => {
     expect(ud).toContain('-e RCON_PASSWORD="$RCON_PASSWORD"');
   });
 
-  it('skips SSM fetch when registry omits RCON_PASSWORD_FROM_SSM', () => {
+  it('fetches multiple *_FROM_SSM values when registry declares several', () => {
+    // 例: RCON_PASSWORD と CF_API_KEY (modpack 自動取得用) を同時に SSM 経由で取得するケース。
+    const ud = buildUserData({
+      game: makeGame({
+        env: {
+          EULA: 'TRUE',
+          RCON_PASSWORD_FROM_SSM: '/gs/atm11/rcon_password',
+          CF_API_KEY_FROM_SSM: '/gs/global/cf_api_key',
+        },
+      }),
+      ...BASE_OPTS,
+    });
+    expect(ud).toContain('--name /gs/atm11/rcon_password');
+    expect(ud).toContain('--name /gs/global/cf_api_key');
+    expect(ud).toContain('-e RCON_PASSWORD="$RCON_PASSWORD"');
+    expect(ud).toContain('-e CF_API_KEY="$CF_API_KEY"');
+    // SSM 参照 hint そのものは container に渡らない (実値だけが -e で渡る)
+    expect(ud).not.toContain('RCON_PASSWORD_FROM_SSM=');
+    expect(ud).not.toContain('CF_API_KEY_FROM_SSM=');
+  });
+
+  it('skips SSM fetch when registry has no *_FROM_SSM keys', () => {
     const ud = buildUserData({
       game: makeGame({
         env: { EULA: 'TRUE' },
@@ -160,7 +236,33 @@ describe('buildUserData — RCON / SNS optional sections', () => {
       ...BASE_OPTS,
     });
     expect(ud).not.toContain('aws ssm get-parameter');
-    expect(ud).toContain('no RCON_PASSWORD_FROM_SSM in registry');
+    expect(ud).toContain('no *_FROM_SSM in registry');
+  });
+
+  it('treats *_FROM_SSM with empty value as disabled (no SSM fetch, no -e injection)', () => {
+    const ud = buildUserData({
+      game: makeGame({
+        env: {
+          EULA: 'TRUE',
+          RCON_PASSWORD_FROM_SSM: '', // disabled
+        },
+      }),
+      ...BASE_OPTS,
+    });
+    expect(ud).not.toContain('aws ssm get-parameter');
+    expect(ud).not.toContain('-e RCON_PASSWORD=');
+  });
+
+  it('throws on unsafe SSM-derived env key', () => {
+    // 不正な文字 (英数 + _ 以外) を含む key は bash 変数名として使えない → 早期 throw。
+    expect(() =>
+      buildUserData({
+        game: makeGame({
+          env: { 'BAD-KEY_FROM_SSM': '/some/path' },
+        }),
+        ...BASE_OPTS,
+      }),
+    ).toThrow(/unsafe SSM-derived env key/);
   });
 
   it('emits SNS publish only when readyNotifySnsTopicArn is provided', () => {

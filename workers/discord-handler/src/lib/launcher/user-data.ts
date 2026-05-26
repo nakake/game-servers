@@ -68,16 +68,71 @@ export function buildUserData(opts: BuildUserDataOptions): string {
   const port = game.ports[0]?.port ?? 25565;
   const endpoint = fqdn !== undefined ? `${fqdn}:${port}` : `<public-ip>:${port}`;
 
-  // RCON password の SSM path。registry env の RCON_PASSWORD_FROM_SSM (SSM 参照 hint)。
-  // 無いゲームは RCON 無しとして SSM 取得 step ごと skip する。
-  const rconSsmPath = game.env.RCON_PASSWORD_FROM_SSM;
+  // SSM 参照は env キーの suffix `_FROM_SSM` で表現する汎用ハンドリング:
+  //   RCON_PASSWORD_FROM_SSM=/gs/atm11/rcon_password
+  //     → SSM から値を取得して container に -e RCON_PASSWORD=<値> で渡す
+  //   CF_API_KEY_FROM_SSM=/gs/global/cf_api_key (modpack 自動取得用) も同じ規則で効く。
+  // 空文字値は「無効化」扱い (registry に項目だけ残してオフにしたいときに使える)。
+  const SSM_SUFFIX = '_FROM_SSM';
+  const ssmRefs = Object.entries(game.env)
+    .filter(([key, value]) => key.endsWith(SSM_SUFFIX) && value !== '')
+    .map(([key, ssmPath]) => {
+      const envKey = key.slice(0, -SSM_SUFFIX.length);
+      // bash 変数名として安全であること (大文字英数 + _、英字 or _ 始まり) を保証。
+      // 異常な key が来た場合は早めに throw して気付けるようにする。
+      if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(envKey)) {
+        throw new Error(`unsafe SSM-derived env key: ${key}`);
+      }
+      return { envKey, ssmPath };
+    });
 
-  // container に渡す env: registry.json の env を踏襲。RCON_PASSWORD_FROM_SSM は SSM 参照
-  // hint なので container には渡さない (実値は SSM から取得して RCON_PASSWORD で渡す)。
+  // container に渡す env: registry.json の env を踏襲。`*_FROM_SSM` は SSM 参照 hint なので
+  // container には渡さない (実値は ssmRefs 経由で別途 SSM 取得して -e で渡す)。
   const envFromRegistry = Object.entries(game.env)
-    .filter(([key]) => key !== 'RCON_PASSWORD_FROM_SSM')
+    .filter(([key]) => !key.endsWith(SSM_SUFFIX))
     .map(([key, value]) => `  -e ${shellEscape(key)}=${shellEscape(value)}`)
     .join(' \\\n');
+
+  // SSM 取得 step (ssmRefs を順に aws ssm get-parameter)。何もなければ単に skip ログを出す。
+  const ssmFetchBlock =
+    ssmRefs.length === 0
+      ? `echo "[user-data] no *_FROM_SSM in registry — skip SSM fetch"`
+      : ssmRefs
+          .map(
+            (ref) =>
+              `${ref.envKey}=$(aws ssm get-parameter \\
+  --name ${ref.ssmPath} \\
+  --with-decryption \\
+  --region ${awsRegion} \\
+  --query 'Parameter.Value' \\
+  --output text)
+echo "[user-data] ${ref.envKey} fetched from SSM (length=\${#${ref.envKey}})"`,
+          )
+          .join('\n');
+
+  // docker run の -e flags: ssmRefs 各値を `-e KEY="$KEY"` で注入する。末尾改行は次行への
+  // 継続 (`\`) のため必要。ssmRefs 空なら何も挿入しない。
+  const ssmEnvFlags =
+    ssmRefs.length === 0
+      ? ''
+      : ssmRefs.map((ref) => `  -e ${ref.envKey}="$${ref.envKey}" \\\n`).join('');
+
+  // 初回起動 (空 EBS) で seed modpack が指定されていれば S3 → /data に展開する。
+  // snapshot 復元時は /data に world + mods が既に入っているため触らない (formatBlankVolume=false)。
+  // S3 URI を Worker → user-data に直接埋め込む経路 = presigned URL の `&` 化け問題を回避できる
+  // (EC2 instance profile の S3 ReadOnly で aws s3 cp が認証なし URL を扱う必要なし)。
+  const seedModpackS3Uri = game.seed_modpack_s3_uri;
+  const seedModpackBlock =
+    formatBlankVolume && seedModpackS3Uri !== undefined && seedModpackS3Uri !== ''
+      ? `# ---- 1.5. 初回起動: seed modpack を S3 から取得して /data に展開 ----
+echo "[user-data] downloading seed modpack from ${seedModpackS3Uri}"
+aws s3 cp ${shellEscape(seedModpackS3Uri)} /tmp/modpack.zip --region ${awsRegion}
+echo "[user-data] extracting modpack to ${dataDir}"
+unzip -q -o /tmp/modpack.zip -d ${dataDir}
+rm /tmp/modpack.zip
+chown -R ${CONTAINER_UID}:${CONTAINER_UID} ${dataDir}
+echo "[user-data] seed modpack extracted, /data ready for container"`
+      : `echo "[user-data] no seed modpack to apply (formatBlankVolume=${String(formatBlankVolume)}, has_uri=${String(seedModpackS3Uri !== undefined && seedModpackS3Uri !== '')})"`;
 
   const isBuild = game.image_source === 'build';
   // docker run で参照する image。build はローカルビルド tag、pull は registry の image。
@@ -96,7 +151,8 @@ exec > >(tee -a "$LOG_FILE") 2>&1
 echo "[user-data] start: game=${game.game_id} image_source=${game.image_source}"
 
 # ---- 0. docker install + start (AL2023 は docker 同梱なし) ----
-dnf install -y docker
+# unzip は seed modpack 展開に必要 (AL2023 base image に同梱されない)。
+dnf install -y docker unzip
 systemctl enable --now docker
 echo "[user-data] docker installed: $(docker --version)"
 
@@ -141,6 +197,8 @@ if [ "$FORMATTED" = "1" ]; then
   echo "[user-data] chown ${dataDir} -> uid ${CONTAINER_UID} (new volume)"
 fi
 
+${seedModpackBlock}
+
 # ---- 2. コンテナイメージ準備 ----
 ${
     isBuild
@@ -158,18 +216,8 @@ docker pull ${game.container_image}
 echo "[user-data] image pulled: ${game.container_image}"`
   }
 
-# ---- 3. RCON_PASSWORD を SSM Parameter Store から取得 ----
-${
-    rconSsmPath !== undefined
-      ? `RCON_PASSWORD=$(aws ssm get-parameter \\
-  --name ${rconSsmPath} \\
-  --with-decryption \\
-  --region ${awsRegion} \\
-  --query 'Parameter.Value' \\
-  --output text)
-echo "[user-data] RCON_PASSWORD fetched from SSM (length=\${#RCON_PASSWORD})"`
-      : `echo "[user-data] no RCON_PASSWORD_FROM_SSM in registry — skip SSM fetch"`
-  }
+# ---- 3. SSM Parameter Store から \`*_FROM_SSM\` 参照値を取得 ----
+${ssmFetchBlock}
 
 # ---- 4. docker run ----
 docker run -d \\
@@ -179,7 +227,7 @@ docker run -d \\
   -p ${port}:${port}/tcp \\
   -v ${dataDir}:/data \\
 ${envFromRegistry} \\
-${rconSsmPath !== undefined ? '  -e RCON_PASSWORD="$RCON_PASSWORD" \\\n' : ''}  --restart=no \\
+${ssmEnvFlags}  --restart=no \\
   ${imageRef}
 echo "[user-data] container started"
 

@@ -352,50 +352,76 @@ Phase 1 の経路を壊していないことを確認:
 
 すべて緑になったら Step 9 (ドキュメント更新 + Phase 3 完了マーク、`docs/phase3-plan.md`) に進む。
 
-## 新ゲーム追加時の手順 (将来 Phase 6 で参照)
+## 新ゲーム追加時の手順
 
-新ゲーム `<game>` を追加するときは:
+Phase 6 (2026-05-26) で `scripts/setup-sidecar-secret.mjs` を実装済 — **以下 1 コマンド** で
+SSM Parameter 投入 + Wrangler secret JSON map 再構築まで自動で reconcile される:
+
+```powershell
+# 事前: $env:CLOUDFLARE_API_TOKEN がセット済 (KV put 等で使う cfut_... トークンと同じ)
+# 事前: aws CLI が認証済 (`aws login` で SSO セッション開始)
+
+node scripts/setup-sidecar-secret.mjs <game>
+```
+
+挙動:
+
+| Step | 動作 | 冪等性 |
+|---|---|---|
+| 1 | `/gs/<game>/sidecar_hmac_secret` の存在確認 → 無ければ CSPRNG 32-byte base64 を生成して SecureString 投入 | 既存ならスキップ (上書きしない) |
+| 2 | SSM 全 `/gs/*/sidecar_hmac_secret` を列挙 (game の追加・削除を自動検出) | 常に最新状態 |
+| 3 | 各 game の値を取得 → JSON map `{atm11: "...", atm10: "...", ...}` 構築 → `SIDECAR_HMAC_SECRETS` に stdin 経由で投入 | 常に reconcile (Worker 側 drift 自動修復) |
+
+事前検証は `--dry-run` で副作用なしプレビュー可。
+
+cloud-init の `docker run` で `-e GAME_ID=<game>` を渡せば sidecar が SSM
+`/gs/<game>/sidecar_hmac_secret` を読み Worker `/sidecar/registry` で認証される。
+
+> Phase 3 で先送りした script を Phase 6 で ATM10 追加実証時に実装 (`docs/phase3-plan.md` L193
+> の予告通り)。register-game.mjs への統合は引き続き **行わない** (冪等性懸念 + secret セット
+> アップを毎回の register-game フローに混ぜる必然性が薄い)。
+
+### 旧手動手順 (script が動かない緊急時の reference)
+
+`scripts/setup-sidecar-secret.mjs` が何らかの理由で使えない / 内部挙動を理解したいとき:
 
 1. **SSM**: `/gs/<game>/sidecar_hmac_secret` を Step 1 と同じ流れで投入 (game ごとに独立な secret)
-2. **Wrangler secret**: `SIDECAR_HMAC_SECRETS` を **既存値を保持したまま新 game の key を追加**
-   して再投入。流れ:
-
-   ```powershell
-   # 現在の secret の値を取得する API は Wrangler に無いので、初回 Step 2 で投入した
-   # JSON 全体を手元で保持しておくか、`docs/.secrets/` の管理外メモに残しておく必要がある。
-   # 失った場合は **全 game の secret を再生成 + SSM 再投入 + JSON 再構築** が要る。
-   $payload = @{
-     atm11   = $atm11SidecarSecret
-     vanilla = $vanillaSidecarSecret
-   } | ConvertTo-Json -Compress
-   $payload | pnpm wrangler secret put SIDECAR_HMAC_SECRETS
-   ```
-
+2. **Wrangler secret**: 既存 SSM 全件を `aws ssm get-parameter --with-decryption` で取得し、
+   `{<game>: <secret>, ...}` JSON map を組み立てて `pnpm wrangler secret put SIDECAR_HMAC_SECRETS`
+   に stdin 投入
 3. **新ゲーム sidecar を起動**: cloud-init の `docker run` で `-e GAME_ID=<game>` を渡せば
    sidecar が SSM `/gs/<game>/sidecar_hmac_secret` を読み Worker `/sidecar/registry` で
    認証される
 
-> Phase 3 では atm11 一個。Phase 6 (新ゲーム追加実証) で実際に複数ゲームを足す段階で、上記
-> JSON ローテーションの面倒くささが顕在化したら `scripts/setup-sidecar-secret.mjs` のような
-> ヘルパースクリプトを検討する。register-game.mjs への統合は **行わない**
-> (`docs/phase3-plan.md` Step 5 / Open Questions で確定 2026-05-23)。
+script はこれを自動化したものなので、内部の流れは同じ。
 
 ## ローテーション
 
-万一 secret が漏洩した / IAM 監査でローテーションが必要になった場合の手順:
+万一 secret が漏洩した / IAM 監査でローテーションが必要になった場合:
 
-1. Step 1 で **同じパス** に `--overwrite` フラグ付きで再投入 (新乱数を生成):
+1. **SSM 側を `--overwrite` で再生成**:
 
    ```powershell
+   $newSidecarSecret = [Convert]::ToBase64String(
+     [System.Security.Cryptography.RandomNumberGenerator]::GetBytes(32)
+   )
    aws ssm put-parameter `
-     --name /gs/atm11/sidecar_hmac_secret `
+     --name /gs/<game>/sidecar_hmac_secret `
      --value $newSidecarSecret `
      --type SecureString `
      --overwrite `
      --region ap-northeast-1
    ```
 
-2. Step 2 と同じ流れで `SIDECAR_HMAC_SECRETS` 全体を再投入 (該当 game の key だけ新値に置換)
+2. **Wrangler 側を script で reconcile** — `setup-sidecar-secret.mjs` は SSM の現状を読んで
+   JSON map を再構築するため、SSM 上書き後に実行すれば自動で Worker 側も更新される:
+
+   ```powershell
+   node scripts/setup-sidecar-secret.mjs <game>
+   ```
+
+   (Step 1 で値を生成してしまった場合は `--overwrite` の影響で script の `[1/3]` は
+   "already exists — not overwriting" になり、`[2/3]` `[3/3]` で新値を Worker に反映する)
 
 3. **稼働中の sidecar / Worker は反映タイミングが異なる**:
    - Worker は次回 invocation で新値を読む (即時)

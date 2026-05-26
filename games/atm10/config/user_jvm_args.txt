@@ -1,0 +1,10 @@
+# JVM args for ATM10 (NeoForge 21.1.x / Java 21)
+# ATM11 と同じく Generational ZGC を採用。Java 21 で Generational ZGC は GA 済。
+
+-Xms10G
+-Xmx10G
+-XX:+UseZGC
+-XX:+AlwaysPreTouch
+-XX:+DisableExplicitGC
+-XX:-OmitStackTraceInFastThrow
+-XX:+UnlockExperimentalVMOptions

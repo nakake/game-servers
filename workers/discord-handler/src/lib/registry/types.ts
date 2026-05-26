@@ -22,6 +22,11 @@ export interface GameDefinition {
   // Phase 0 で手動作成した snapshot を一度だけ使う用途。以降は /stop が作る
   // game-world snapshot が優先されるため、実質的にブートストラップ専用。
   seed_snapshot_id?: string | null;
+  // 初回起動時に S3 から取得して /data 配下に展開する modpack zip の S3 URI
+  // (s3://bucket/key)。formatBlankVolume=true の経路でのみ使用、snapshot 復元時は
+  // 触らない。aws s3 cp で取得し unzip で展開、IAM は EC2 instance profile に依存。
+  // 例: "s3://gs-game-configs/atm10/modpack/server-pack.zip"
+  seed_modpack_s3_uri?: string;
   spot_max_price_jpy_per_hour: number | null;
 
   subdomain: string;
