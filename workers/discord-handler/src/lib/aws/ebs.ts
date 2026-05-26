@@ -325,17 +325,30 @@ export async function describeSnapshotsByTag(
 }
 
 // snapshot を id 指定で 1 件取得する。存在しなければ undefined。
-// waitForSnapshotCompleted の polling 用。
+// waitForSnapshotCompleted の polling と、Cron の volume-cleanup (handlers/cleanup.ts) で使う。
+//
+// AWS は「存在しない / 既に削除済」を InvalidSnapshot.NotFound エラーとして返すため
+// (空 result 配列ではなく)、この関数で吸収して契約通り undefined を返す。これにより
+// 呼び出し側 (cleanup.ts:45-51) は「snapshot が無い → entry を drop」分岐に乗れる。
+// describeVolumeById と同じパターン。
 export async function describeSnapshotById(
   client: AwsApiClient,
   snapshotId: string,
 ): Promise<SnapshotDetail | undefined> {
-  const xml = await client.queryRequest({
-    service: 'ec2',
-    action: 'DescribeSnapshots',
-    version: EC2_API_VERSION,
-    params: { 'SnapshotId.1': snapshotId },
-  });
+  let xml: string;
+  try {
+    xml = await client.queryRequest({
+      service: 'ec2',
+      action: 'DescribeSnapshots',
+      version: EC2_API_VERSION,
+      params: { 'SnapshotId.1': snapshotId },
+    });
+  } catch (err) {
+    if (err instanceof AwsApiError && err.awsErrorCode === 'InvalidSnapshot.NotFound') {
+      return undefined;
+    }
+    throw err;
+  }
   const parsed = xmlParser.parse(xml) as RawDescribeSnapshotsResponse;
   const item = (parsed.DescribeSnapshotsResponse.snapshotSet?.item ?? [])[0];
   return item !== undefined ? rawSnapshotToDetail(item) : undefined;
@@ -417,16 +430,10 @@ export async function waitForSnapshotCompleted(
   const deadline = Date.now() + timeout;
 
   while (Date.now() < deadline) {
-    let snap: SnapshotDetail | undefined;
-    try {
-      snap = await describeSnapshotById(client, options.snapshotId);
-    } catch (err) {
-      // CreateSnapshot 直後は eventual consistency で InvalidSnapshot.NotFound が
-      // 返ることがある。terminal error ではないので polling を継続する。
-      if (!(err instanceof AwsApiError && err.awsErrorCode === 'InvalidSnapshot.NotFound')) {
-        throw err;
-      }
-    }
+    // CreateSnapshot 直後は eventual consistency で snapshot がまだ見えないことがある。
+    // describeSnapshotById は InvalidSnapshot.NotFound を undefined に正規化するので、
+    // undefined のときは terminal ではないとみなして polling を継続する。
+    const snap = await describeSnapshotById(client, options.snapshotId);
     if (snap !== undefined) {
       if (snap.state === 'completed') return snap;
       if (snap.state === 'error') {
