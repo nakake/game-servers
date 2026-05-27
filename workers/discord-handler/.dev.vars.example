@@ -6,10 +6,10 @@
 # /admin/* endpoint の Bearer 認証トークン。ローカル開発の固有値を入れる。
 ADMIN_API_KEY=local-dev-changeme
 
-# ---- AWS IAM Access Key (Phase 1: IAM ユーザー gs-worker-caller) ----
-# runbook-phase1.md の Step 1 で作成。
-AWS_ACCESS_KEY_ID=AKIA...
-AWS_SECRET_ACCESS_KEY=...
+# ---- AWS リージョン ----
+# Worker 本体は OIDC AssumeRoleWithWebIdentity で 15min 短期 credentials を取得する
+# (Phase 5 で長期 IAM key は撤去済 = AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY は不要)。
+# code は env.AWS_REGION ?? 'ap-northeast-1' で fallback するので未指定でも動く。
 AWS_REGION=ap-northeast-1
 
 # ---- Discord ----
