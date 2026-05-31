@@ -16,7 +16,11 @@ export type {
   StopResult,
   StatusResult,
 } from "./rpc-types.js";
-export { COST_FIELD_DEFAULTS, resolveCostFields } from "./build.js";
+export {
+  COST_FIELD_DEFAULTS,
+  resolveCostFields,
+  applyGameUpdate,
+} from "./build.js";
 export type { AdminTokenRecord, AdminSessionRecord } from "./auth-types.js";
 export {
   ADMIN_TOKEN_PREFIX,
