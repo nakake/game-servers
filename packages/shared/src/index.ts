@@ -17,3 +17,15 @@ export type {
   StatusResult,
 } from "./rpc-types.js";
 export { COST_FIELD_DEFAULTS, resolveCostFields } from "./build.js";
+export type { AdminTokenRecord, AdminSessionRecord } from "./auth-types.js";
+export {
+  ADMIN_TOKEN_PREFIX,
+  ADMIN_SESSION_PREFIX,
+  ADMIN_TOKEN_TTL_SECONDS,
+  ADMIN_SESSION_TTL_SECONDS,
+  adminTokenKey,
+  adminSessionKey,
+  generateOpaqueToken,
+  parseAllowlist,
+  deriveTier,
+} from "./auth-types.js";

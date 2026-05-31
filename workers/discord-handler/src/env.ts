@@ -90,4 +90,13 @@ export interface Env {
   // 機能しないため graceful degradation はしない。
   // 実体作成: `wrangler kv namespace create GAME_REGISTRY` → wrangler.toml に id を記載。
   GAME_REGISTRY: KVNamespace;
+
+  // ---- Phase 7: admin WebUI 連携 (magic link token 発行) ----
+  // admin-webui (gs-admin.<base-domain>) の公開 URL。/panel が button link を組み立てる。
+  // 例: "https://gs-admin.example.com"。末尾スラッシュは panel.ts 側で正規化する。
+  ADMIN_BASE_URL: string;
+  // magic link の one-shot token (`admin_token:*`) を put する KV。admin-webui と
+  // **同じ namespace id** を共有する (docs §5.1)。/panel が put、admin-webui の /auth が読む。
+  // 実体作成: `wrangler kv namespace create ADMIN_AUTH` → 両 Worker の wrangler.toml に同 id を bind。
+  ADMIN_AUTH: KVNamespace;
 }
