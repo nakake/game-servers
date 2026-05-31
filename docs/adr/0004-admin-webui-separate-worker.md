@@ -1,6 +1,6 @@
 # ADR 0004: 管理 WebUI を discord-handler とは別の Worker に分離する
 
-- **Status**: Proposed
+- **Status**: Accepted
 - **Date**: 2026-05-31
 - **Deciders**: nakake
 - **Related**: [phase7-modpack-webui.md](../phase7-modpack-webui.md) §2 / [adr/0003-magic-link-auth.md](0003-magic-link-auth.md) / [design.md](../design.md) §4 (Worker 構成)
@@ -38,15 +38,15 @@ workers/admin-webui/   ── 新 Worker (gs-admin.<base-domain>)
 
 workers/discord-handler/   ── 既存、ほぼ無改修
   - Discord / sidecar / OIDC / AWS (OIDC 秘密鍵はここに閉じたまま)
-  - service-binding 専用の内部 endpoint を追加:
-      start / stop / status / S3 config sync (= AWS に触る操作のみ)
+  - WorkerEntrypoint RPC class を追加 (HTTP route ではない):
+      start / stop / status / s3Sync メソッド (= AWS に触る操作のみ)
 ```
 
 ### 設計上のポイント
 
 - **同一オリジン**: SPA と `/admin/api/*` は同じ admin-webui Worker に置く。session cookie が同一オリジンで完結し、CORS 問題が出ない
-- **AWS 鍵の隔離**: admin-webui は `OIDC_PRIVATE_KEYS_JWK` を**持たない**。AWS に触る操作 (start/stop/status/S3) は Service Binding (`env.DISCORD_HANDLER.fetch(...)`) で discord-handler に委譲。鍵は引き続き discord-handler 1 箇所のみ
-- **Service Binding は同一 colo の Worker 間 RPC**: ネットワークホップなし・無料。内部 endpoint は service-binding 経由のみ許可 (外部から直叩き不可)
+- **AWS 鍵の隔離**: admin-webui は `OIDC_PRIVATE_KEYS_JWK` を**持たない**。AWS に触る操作 (start/stop/status/s3Sync) は Service Binding **RPC** (`env.DISCORD_HANDLER.start(gameId)` 等) で discord-handler に委譲。鍵は引き続き discord-handler 1 箇所のみ
+- **RPC は public HTTP 面を作らない**: discord-handler に `WorkerEntrypoint` class を生やしメソッドを公開する。これは Service Binding 経由でしか呼べず、HTTP route として外部到達しない。同一 colo の Worker 間 RPC でホップなし・無料。**共有 secret も不要** (public endpoint を生やさないので守る対象がない)
 - **KV namespace は共有**: 同じ namespace id を両 Worker に bind。GAME_REGISTRY / SERVER_STATE は両者から読める
 - **secrets は責務で分割**: admin-webui = CF_API_KEY + Cloudflare DNS token / discord-handler = OIDC 鍵 (従来通り)。鍵の二重保管は発生しない
 
@@ -65,10 +65,10 @@ workers/discord-handler/   ── 既存、ほぼ無改修
 | トレードオフ | 評価 / 緩和 |
 |---|---|
 | デプロイ単位が 2 つに増える | 同じ wrangler ツールチェーン内。Cloudflare Pages のような別製品ではない。CI/手動 deploy の step が 1 個増えるのみ |
-| Service Binding の indirection | 同一 colo RPC でホップなし・無料。orchestrator を「共有 lib」ではなく「内部 endpoint」として実装する形になるが手間はほぼ同じ (E-1) |
+| Service Binding の indirection | 同一 colo RPC でホップなし・無料。orchestrator を「共有 lib」ではなく「WorkerEntrypoint RPC メソッド」として実装する形になるが手間はほぼ同じ (E-1) |
 | 共有コード (registry types / build.ts) の置き場 | monorepo の workspace package か、admin-webui に置いて script から import。AWS ロジックは discord-handler 側に残すので共有対象は型と変換関数程度 |
 | 独自ドメインが事実上必須 | cookie / WAF の観点でいずれ要る ([[workers-dev-no-zone-waf]])。分離で前倒しになるだけ |
-| 内部 endpoint の保護 | service-binding 経由のみ許可する判定を入れる (header or binding 検証)。外部公開しない |
+| 内部呼び出しの保護 | WorkerEntrypoint RPC を使うので **public HTTP route を生やさない** = 外部から到達不可。header 検証や共有 secret は不要 |
 
 ### 「単一 Worker」決定の撤回
 
