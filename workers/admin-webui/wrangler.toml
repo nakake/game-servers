@@ -1,0 +1,64 @@
+# Cloudflare Worker — admin-webui (Phase 7、ADR 0004)
+#
+# modpack 管理 SPA + JSON API を配信する別 Worker。discord-handler とは分離し、
+# AWS 秘密鍵を持たない (AWS 操作は DISCORD_HANDLER RPC へ委譲、E-1 で有効化)。
+#
+# このファイルは公開リポジトリに含まれるため値は placeholder。実値はローカル作業ツリーに
+# 入れ `git update-index --skip-worktree` で git から隠す (docs placeholder-skip-worktree 運用)。
+#
+# 本番デプロイは `pnpm deploy` (要 Cloudflare アカウント + wrangler login)。
+# ローカル開発は `pnpm dev`。
+
+name = "gs-admin-webui"
+main = "src/index.ts"
+compatibility_date = "2026-05-01"
+compatibility_flags = ["nodejs_compat"]
+
+# 本番ログを Cloudflare dashboard で見るために有効化 (Workers Logs)。
+[observability]
+enabled = true
+
+# 独自ドメイン割当 (docs §11.5)。*.workers.dev には zone WAF が効かず、Secure cookie /
+# 同一オリジン運用のため独自ホストが前提。割当は B-0b の deploy 時に行う (user 操作)。
+routes = [{ pattern = "gs-admin.<YOUR_BASE_DOMAIN>", custom_domain = true }]
+
+# ---- Static Assets (SPA) ----
+# Vite build 出力を配信。admin-webui には外来ルートが無いので not_found_handling=SPA を
+# 素直に使える (discord-handler 同居時のような run_worker_first の小細工は不要、ADR 0004)。
+[assets]
+directory = "./public"
+binding = "ASSETS"
+not_found_handling = "single-page-application"
+
+# ---- SPA build の deploy 結合 (C-1 で有効化) ----
+# CI 不在のため deploy 時に必ず build を走らせ、空/古い public/ の deploy 事故を防ぐ (docs §11.7)。
+# admin-ui パッケージ (Vite + Svelte) は C-1 で追加するため、それまでコメントアウト。
+# [build]
+# command = "pnpm --filter admin-ui build"
+
+# ---- KV (discord-handler と同じ namespace id を共有) ----
+[[kv_namespaces]]
+binding = "GAME_REGISTRY"
+id = "<YOUR_GAME_REGISTRY_KV_ID>"
+
+[[kv_namespaces]]
+binding = "SERVER_STATE"
+id = "<YOUR_SERVER_STATE_KV_ID>"
+
+# ADMIN_AUTH は Phase 7 新規。`wrangler kv namespace create ADMIN_AUTH` で発行した id を入れる。
+[[kv_namespaces]]
+binding = "ADMIN_AUTH"
+id = "<YOUR_ADMIN_AUTH_KV_ID>"
+
+# ---- AWS 操作を委譲する Service Binding (RPC、E-1 で有効化) ----
+# discord-handler が export する InternalRpc (WorkerEntrypoint) を指定する。InternalRpc は
+# E-1 で実装するため、それまで有効化しない (存在しない entrypoint への binding は deploy で壊れる)。
+# [[services]]
+# binding = "DISCORD_HANDLER"
+# service = "discord-handler"
+# entrypoint = "InternalRpc"
+
+# シークレットは wrangler secret put NAME で投入する (このファイルには書かない):
+#   - CF_API_KEY              CurseForge API key (x-api-key header 用)
+#   - ADMIN_DISCORD_USER_IDS  管理者 user_id の CSV (tier=admin、最低 1 件)
+#   - PLAYER_DISCORD_USER_IDS プレイヤー user_id の CSV (tier=player、admin 専用運用なら空可)

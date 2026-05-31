@@ -1,0 +1,24 @@
+{
+  "name": "@game-servers/admin-webui",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Cloudflare Worker — admin SPA + JSON API for modpack management (Phase 7, ADR 0004)",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "build": "wrangler deploy --dry-run --outdir=dist"
+  },
+  "dependencies": {
+    "@gs/shared": "workspace:*"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20250101.0",
+    "typescript": "^5.7.0",
+    "vitest": "^2.1.8",
+    "wrangler": "^3.99.0"
+  }
+}

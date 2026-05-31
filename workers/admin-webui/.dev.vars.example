@@ -1,0 +1,15 @@
+# Wrangler ローカル開発用の環境変数サンプル (Phase 7 admin-webui)。
+#
+# 使い方: このファイルを `.dev.vars` にコピーして実値を入れる (`.dev.vars` は gitignore 済)。
+# `wrangler dev` 起動時に自動で読み込まれる。本番は `wrangler secret put` で投入する。
+#
+# 注意: ここに実値を書かない (このファイルはコミットされる)。プレースホルダのみ。
+
+# CurseForge API key (https://console.curseforge.com で発行、x-api-key header 用)
+CF_API_KEY=your_curseforge_api_key_here
+
+# 管理者の Discord user_id の CSV (tier=admin)。最低 1 件必須。
+ADMIN_DISCORD_USER_IDS=111111111111111111,222222222222222222
+
+# プレイヤーの Discord user_id の CSV (tier=player)。admin 専用運用なら空可。
+PLAYER_DISCORD_USER_IDS=333333333333333333,444444444444444444
