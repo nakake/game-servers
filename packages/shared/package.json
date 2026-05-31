@@ -1,0 +1,19 @@
+{
+  "name": "@gs/shared",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Shared types + pure helpers for game-servers Workers (registry schema, RPC contracts, registry build). No AWS/OIDC logic (ADR 0004).",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./registry-types": "./src/registry-types.ts",
+    "./rpc-types": "./src/rpc-types.ts",
+    "./build": "./src/build.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0"
+  }
+}

@@ -18,8 +18,17 @@ importers:
         specifier: ^5.7.0
         version: 5.9.3
 
+  packages/shared:
+    devDependencies:
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
+
   workers/discord-handler:
     dependencies:
+      '@gs/shared':
+        specifier: workspace:*
+        version: link:../../packages/shared
       aws4fetch:
         specifier: ^1.0.20
         version: 1.0.20
