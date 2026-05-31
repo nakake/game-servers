@@ -46,3 +46,4 @@
 | [0001](0001-cloudflare-workers-over-lambda.md) | 制御プレーンに Cloudflare Workers を採用する | Accepted |
 | [0002](0002-mc-stop-flow-docker-ssm.md) | MC サーバーの停止フローを Docker + SSM Run Command で構成する | Accepted |
 | [0003](0003-magic-link-auth.md) | 管理 WebUI の認証に Discord magic link 方式を採用する | Proposed |
+| [0004](0004-admin-webui-separate-worker.md) | 管理 WebUI を discord-handler とは別の Worker に分離する | Proposed |
