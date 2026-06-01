@@ -30,11 +30,11 @@ directory = "./public"
 binding = "ASSETS"
 not_found_handling = "single-page-application"
 
-# ---- SPA build の deploy 結合 (C-1 で有効化) ----
+# ---- SPA build の deploy 結合 (C-1 で有効化済) ----
 # CI 不在のため deploy 時に必ず build を走らせ、空/古い public/ の deploy 事故を防ぐ (docs §11.7)。
-# admin-ui パッケージ (Vite + Svelte) は C-1 で追加するため、それまでコメントアウト。
-# [build]
-# command = "pnpm --filter admin-ui build"
+# admin-ui (Vite + Svelte、リポジトリ root) を build し、出力は ./public へ吐かれる (admin-ui/vite.config.ts)。
+[build]
+command = "pnpm --filter admin-ui build"
 
 # ---- KV (discord-handler と同じ namespace id を共有) ----
 [[kv_namespaces]]

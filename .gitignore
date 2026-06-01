@@ -48,6 +48,8 @@ out/
 *.tsbuildinfo
 # Phase 3 Step 7: scripts/build-sidecar-ami.ps1 の中間生成物 (sidecar-image.tar) 置き場
 .build/
+# Phase 7 C-1: admin-ui (Vite) の build 出力。deploy 時に wrangler [build] が再生成するため追跡しない (docs §7.2)
+workers/admin-webui/public/
 
 # ============================================================
 # TypeScript / JS

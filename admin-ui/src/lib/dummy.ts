@@ -1,0 +1,117 @@
+// C-1 用のダミーデータ。
+//
+// バックエンド (admin-webui) 不在で `vite dev` を単体起動したとき、または未デプロイ時に
+// 一覧 / 詳細 UI を確認するためのもの。fetch 失敗時に各画面が fallback する
+// (C-1 の「ダミーデータで動作」要件、docs §10.1)。
+// 形は games/atm10/registry.json など実 registry に合わせてある。
+import type { GameDefinition } from "@gs/shared/registry-types";
+
+export const DUMMY_GAMES: GameDefinition[] = [
+  {
+    game_id: "atm10",
+    display_name: "All The Mods 10",
+    category: "minecraft-modded",
+    enabled: true,
+    instance_types: ["r7a.large", "r6a.large", "m7a.xlarge"],
+    ebs_size_gb: 30,
+    seed_snapshot_id: null,
+    spot_max_price_jpy_per_hour: 12,
+    subdomain: "atm10",
+    cf_record_id: "dummy-atm10-record",
+    ports: [{ port: 25565, proto: "TCP" }],
+    container_image: "itzg/minecraft-server:java21",
+    image_source: "pull",
+    env: {
+      EULA: "TRUE",
+      TYPE: "NEOFORGE",
+      MODPACK_PLATFORM: "AUTO_CURSEFORGE",
+      CF_SLUG: "all-the-mods-10",
+      VERSION: "1.21.1",
+      MEMORY: "",
+    },
+    config_s3_prefix: "s3://gs-game-configs/atm10/",
+    idle_check: {
+      type: "minecraft_rcon",
+      timeout_min: 10,
+      heartbeat_interval_sec: 60,
+      config: {},
+    },
+    snapshot: { generations: 3, weekly_s3_backup: true },
+    discord: {
+      start_message: "ATM10 を起動しています…",
+      ready_message: "サーバーの起動が完了しました",
+      stop_message: "ATM10 を停止しました",
+    },
+  },
+  {
+    game_id: "atm11",
+    display_name: "All The Mods 11",
+    category: "minecraft-modded",
+    enabled: false,
+    instance_types: ["r7a.large", "m7a.xlarge"],
+    ebs_size_gb: 40,
+    seed_snapshot_id: null,
+    spot_max_price_jpy_per_hour: 15,
+    subdomain: "atm11",
+    cf_record_id: "dummy-atm11-record",
+    ports: [{ port: 25565, proto: "TCP" }],
+    container_image: "itzg/minecraft-server:java21",
+    image_source: "pull",
+    env: {
+      EULA: "TRUE",
+      TYPE: "NEOFORGE",
+      MODPACK_PLATFORM: "AUTO_CURSEFORGE",
+      CF_SLUG: "all-the-mods-11",
+      CF_FILE_ID: "6543210",
+      VERSION: "1.21.1",
+      MEMORY: "",
+    },
+    config_s3_prefix: "s3://gs-game-configs/atm11/",
+    idle_check: {
+      type: "minecraft_rcon",
+      timeout_min: 10,
+      heartbeat_interval_sec: 60,
+      config: {},
+    },
+    snapshot: { generations: 3, weekly_s3_backup: true },
+    discord: {
+      start_message: "ATM11 を起動しています…",
+      ready_message: "サーバーの起動が完了しました",
+      stop_message: "ATM11 を停止しました",
+    },
+  },
+  {
+    game_id: "vanilla-121",
+    display_name: "Vanilla 1.21",
+    category: "minecraft-vanilla",
+    enabled: true,
+    instance_types: ["m7a.large"],
+    ebs_size_gb: 20,
+    seed_snapshot_id: null,
+    spot_max_price_jpy_per_hour: 8,
+    subdomain: "vanilla",
+    cf_record_id: "dummy-vanilla-record",
+    ports: [{ port: 25565, proto: "TCP" }],
+    container_image: "itzg/minecraft-server:java21",
+    image_source: "pull",
+    env: {
+      EULA: "TRUE",
+      TYPE: "VANILLA",
+      VERSION: "1.21.1",
+      MEMORY: "4G",
+    },
+    config_s3_prefix: "s3://gs-game-configs/vanilla-121/",
+    idle_check: {
+      type: "minecraft_rcon",
+      timeout_min: 10,
+      heartbeat_interval_sec: 60,
+      config: {},
+    },
+    snapshot: { generations: 3, weekly_s3_backup: false },
+    discord: {
+      start_message: "Vanilla を起動しています…",
+      ready_message: "サーバーの起動が完了しました",
+      stop_message: "Vanilla を停止しました",
+    },
+  },
+];
