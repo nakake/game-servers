@@ -53,6 +53,27 @@ a:hover {
   color: var(--muted);
   font-size: 0.85rem;
 }
+.app-header .spacer {
+  flex: 1;
+}
+.dummy-toggle {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+.dummy-toggle button {
+  background: var(--panel-2);
+  color: var(--muted);
+  border: none;
+  padding: 0.15rem 0.55rem;
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+.dummy-toggle button.active {
+  background: var(--accent);
+  color: #07101f;
+}
 
 main {
   max-width: 1100px;
@@ -145,4 +166,87 @@ code {
   overflow: auto;
   font-size: 0.8rem;
   white-space: pre;
+}
+
+/* ---- 編集フォーム (GameDetail, C-2) ---- */
+form {
+  max-width: 640px;
+}
+fieldset {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0.5rem 1rem 1rem;
+  margin: 0 0 1rem;
+  background: var(--panel);
+}
+legend {
+  color: var(--muted);
+  font-size: 0.85rem;
+  padding: 0 0.4rem;
+}
+label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  margin-top: 0.8rem;
+  font-size: 0.88rem;
+}
+input[type="text"] {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  padding: 0.45rem 0.55rem;
+  font-size: 0.9rem;
+}
+input[type="text"]:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.ro-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  margin-top: 0.8rem;
+  font-size: 0.88rem;
+}
+.ro-field code {
+  padding: 0.45rem 0.55rem;
+  background: var(--bg);
+  border: 1px dashed var(--border);
+  border-radius: 6px;
+  color: var(--muted);
+}
+.note {
+  border-left: 3px solid var(--border);
+  padding-left: 0.75rem;
+  margin: 0 0 1rem;
+  font-size: 0.85rem;
+}
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+}
+.actions button {
+  background: var(--accent);
+  color: #07101f;
+  border: none;
+  border-radius: 6px;
+  padding: 0.5rem 1.2rem;
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+.actions button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+.ok-msg {
+  color: var(--ok);
+  font-size: 0.85rem;
+}
+.err-msg {
+  color: #f85149;
+  font-size: 0.85rem;
 }

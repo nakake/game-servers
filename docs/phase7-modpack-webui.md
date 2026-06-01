@@ -40,16 +40,16 @@ modpack の **バージョン更新** (例: ATM10 v3.10 → v3.11) も同様に 
 
 ### 0.2 CurseForge API 調査結果 (要約)
 
-| 項目 | 内容 |
-|---|---|
-| 認証 | `x-api-key: <key>` header |
-| 基底 URL | `https://api.curseforge.com` |
-| modpack 検索 | `GET /v1/mods/search?gameId=432&classId=4471&searchFilter=<keyword>` |
-| modpack 詳細 | `GET /v1/mods/{modId}` (`latestFiles[]` を含む) |
+| 項目         | 内容                                                                                       |
+| ------------ | ------------------------------------------------------------------------------------------ |
+| 認証         | `x-api-key: <key>` header                                                                  |
+| 基底 URL     | `https://api.curseforge.com`                                                               |
+| modpack 検索 | `GET /v1/mods/search?gameId=432&classId=4471&searchFilter=<keyword>`                       |
+| modpack 詳細 | `GET /v1/mods/{modId}` (`latestFiles[]` を含む)                                            |
 | 全バージョン | `GET /v1/mods/{modId}/files` (`fileDate` / `releaseType` / `downloadUrl` / `gameVersions`) |
-| 個別 DL URL | `GET /v1/mods/{modId}/files/{fileId}/download-url` |
-| 制限 | page size 50 / 合計 10,000 件 / rate limit は未公開 |
-| 注意 | distribution NG modpack は `downloadUrl=null` または 403 |
+| 個別 DL URL  | `GET /v1/mods/{modId}/files/{fileId}/download-url`                                         |
+| 制限         | page size 50 / 合計 10,000 件 / rate limit は未公開                                        |
+| 注意         | distribution NG modpack は `downloadUrl=null` または 403                                   |
 
 slug (例 `all-the-mods-10`) → modId 解決は search 経由で 1 発引き可。itzg 側は `CF_SLUG` で動くため Worker は modId をユーザーに見せる必要はないが、API 呼び出しの内部用には保持する。
 
@@ -68,18 +68,19 @@ slug (例 `all-the-mods-10`) → modId 解決は search 経由で 1 発引き可
 
 5〜8 人の MC プレイヤーが modpack を追加・更新できるが、**コスト/サーバサイズに直結する設定は admin (1〜2 人) だけが触れる**ようにする。
 
-| 操作 / フィールド | player | admin |
-|---|---|---|
-| modpack 検索 | ✅ | ✅ |
-| 新規 modpack 追加 (game_id / display_name / cf_slug / cf_file_id / port) | ✅ | ✅ |
-| modpack バージョン更新 (`CF_FILE_ID`) | ✅ | ✅ |
-| start / stop / status | ✅ (Discord でも可) | ✅ |
-| **instance_types / ebs_size_gb / spot_max_price / MEMORY** (コスト・サイズ系) | ❌ 非表示・既定値で固定 | ✅ 追加時/更新時に設定 |
-| ゲーム削除 | ❌ | ❌ (危険操作は Discord/手動) |
+| 操作 / フィールド                                                             | player                  | admin                        |
+| ----------------------------------------------------------------------------- | ----------------------- | ---------------------------- |
+| modpack 検索                                                                  | ✅                      | ✅                           |
+| 新規 modpack 追加 (game_id / display_name / cf_slug / cf_file_id / port)      | ✅                      | ✅                           |
+| modpack バージョン更新 (`CF_FILE_ID`)                                         | ✅                      | ✅                           |
+| start / stop / status                                                         | ✅ (Discord でも可)     | ✅                           |
+| **instance_types / ebs_size_gb / spot_max_price / MEMORY** (コスト・サイズ系) | ❌ 非表示・既定値で固定 | ✅ 追加時/更新時に設定       |
+| ゲーム削除                                                                    | ❌                      | ❌ (危険操作は Discord/手動) |
 
 - **player の新規追加**: コスト系 fields は UI に出さず、サーバ側の安全な既定値 (§5.3) で固定。player が送ってきても **API 側で無視**
 - **enforcement はサーバ側**: UI 非表示は UX。実ガードは Worker の handler で requester の tier を判定し、player のコスト field 書き込みは 403/無視 (§9.1)
 - tier 判定: **player allowlist (`PLAYER_DISCORD_USER_IDS`) / admin allowlist (`ADMIN_DISCORD_USER_IDS`) の 2 本の CSV env**。どちらにも無い user は `/auth` で reject (fail-closed)
+- **modpack の MC バージョンは固定**: AUTO_CURSEFORGE のゲームは Minecraft / loader バージョンが modpack 側 (CF_FILE_ID) で決まる。よって編集 UI はバージョン knob を **CF_FILE_ID** とし、`VERSION` (MC バージョン) は read-only 表示にして PUT に含めない (pack 由来の値を温存)。`MODPACK_PLATFORM!=AUTO_CURSEFORGE` の vanilla 等のみ `VERSION` を直接編集可
 
 ### 非ゴール
 
@@ -136,13 +137,19 @@ slug (例 `all-the-mods-10`) → modId 解決は search 経由で 1 発引き可
 ```typescript
 interface CurseForgeClient {
   // gameId=432 (Minecraft) + classId=4471 (ModPacks) 固定で検索
-  searchModpacks(keyword: string, opts?: { pageSize?: number }): Promise<ModpackSummary[]>;
+  searchModpacks(
+    keyword: string,
+    opts?: { pageSize?: number },
+  ): Promise<ModpackSummary[]>;
 
   // slug → modId + メタデータ (latestFiles 含む)
   resolveSlug(slug: string): Promise<ModpackDetail | undefined>;
 
   // 全バージョンの paginated 取得 (UI 側は最新 20 件程度を見せれば十分)
-  listFiles(modId: number, opts?: { pageSize?: number; index?: number }): Promise<ModpackFile[]>;
+  listFiles(
+    modId: number,
+    opts?: { pageSize?: number; index?: number },
+  ): Promise<ModpackFile[]>;
 }
 
 interface ModpackSummary {
@@ -159,12 +166,12 @@ interface ModpackDetail extends ModpackSummary {
 
 interface ModpackFile {
   fileId: number;
-  displayName: string;     // 例: "ServerFiles-3.10"
+  displayName: string; // 例: "ServerFiles-3.10"
   fileName: string;
-  fileDate: string;        // ISO8601
-  releaseType: 1 | 2 | 3;  // 1=release, 2=beta, 3=alpha
-  gameVersions: string[];  // 例: ["1.21.1", "NeoForge"]
-  downloadUrl: string | null;  // null なら distribution NG
+  fileDate: string; // ISO8601
+  releaseType: 1 | 2 | 3; // 1=release, 2=beta, 3=alpha
+  gameVersions: string[]; // 例: ["1.21.1", "NeoForge"]
+  downloadUrl: string | null; // null なら distribution NG
 }
 ```
 
@@ -221,23 +228,23 @@ Discord 側にも `/panel logout` を用意し、自分の全 session を失効�
 
 ### 5.1 KV namespace の追加・流用
 
-| Namespace | 用途 | Phase 7 で新規? |
-|---|---|---|
-| Namespace | 用途 | Phase 7 で新規? | bind 先 |
-|---|---|---|---|
-| `GAME_REGISTRY` (既存) | game_id → registry.json | 流用 | 両 Worker |
-| `SERVER_STATE` (既存) | 起動状態 / pending_ready / notif_suppress | 流用 | 両 Worker (discord-handler は AWS 委譲時に参照) |
-| `ADMIN_AUTH` (新) | `admin_token:*` / `admin_session:*` | **新規** | 両 Worker (`/panel` token 発行は discord-handler、検証は admin-webui) |
+| Namespace              | 用途                                      | Phase 7 で新規? |
+| ---------------------- | ----------------------------------------- | --------------- | --------------------------------------------------------------------- |
+| Namespace              | 用途                                      | Phase 7 で新規? | bind 先                                                               |
+| ---                    | ---                                       | ---             | ---                                                                   |
+| `GAME_REGISTRY` (既存) | game_id → registry.json                   | 流用            | 両 Worker                                                             |
+| `SERVER_STATE` (既存)  | 起動状態 / pending_ready / notif_suppress | 流用            | 両 Worker (discord-handler は AWS 委譲時に参照)                       |
+| `ADMIN_AUTH` (新)      | `admin_token:*` / `admin_session:*`       | **新規**        | 両 Worker (`/panel` token 発行は discord-handler、検証は admin-webui) |
 
 `SERVER_STATE` に相乗りも可能だが、key prefix 衝突と TTL の独立性のため `ADMIN_AUTH` を別 namespace で作る。**同じ namespace id を両 Worker の `wrangler.toml` に bind する** (KV namespace は複数 Worker から共有可能)。`admin_token:*` は discord-handler の `/panel` command が put し admin-webui の `/auth` が読む、`admin_session:*` は admin-webui のみが扱う。
 
 ### 5.2 KV key 設計
 
-| Key | Value | TTL |
-|---|---|---|
-| `admin_token:<token>` | `{user_id, issued_at, exp_ts, used:bool}` | 300s |
-| `admin_session:<sid>` | `{user_id, issued_at, exp_ts}` | 86400s |
-| `game:<game_id>` (既存 GAME_REGISTRY) | GameDefinition JSON | 無制限 |
+| Key                                   | Value                                     | TTL    |
+| ------------------------------------- | ----------------------------------------- | ------ |
+| `admin_token:<token>`                 | `{user_id, issued_at, exp_ts, used:bool}` | 300s   |
+| `admin_session:<sid>`                 | `{user_id, issued_at, exp_ts}`            | 86400s |
+| `game:<game_id>` (既存 GAME_REGISTRY) | GameDefinition JSON                       | 無制限 |
 
 ### 5.3 GameDefinition の拡張
 
@@ -246,26 +253,27 @@ Discord 側にも `/panel logout` を用意し、自分の全 session を失効�
 ```typescript
 // player / admin 共通で入力可
 interface NewGameFormPlayer {
-  game_id: string;          // "atm10" など。kebab-case
-  display_name: string;     // "All The Mods 10"
-  subdomain: string;        // 既定で game_id と同じ
+  game_id: string; // "atm10" など。kebab-case
+  display_name: string; // "All The Mods 10"
+  subdomain: string; // 既定で game_id と同じ
 
   // CurseForge 由来 (UI が自動入力)
   cf_slug: string;
-  cf_file_id?: number;      // 未指定なら latest (itzg が自動解決)
-  cf_modpack_meta: {        // UI に表示するためのキャッシュ。registry には保存しない
+  cf_file_id?: number; // 未指定なら latest (itzg が自動解決)
+  cf_modpack_meta: {
+    // UI に表示するためのキャッシュ。registry には保存しない
     modId: number;
     minecraftVersion: string;
-    modLoader: 'NEOFORGE' | 'FORGE' | 'FABRIC' | 'QUILT';
+    modLoader: "NEOFORGE" | "FORGE" | "FABRIC" | "QUILT";
   };
-  port: number;             // 既定: 25565
+  port: number; // 既定: 25565
 }
 
 // admin のみ入力可。player の追加時は UI に出さず下記 DEFAULT を強制
 interface NewGameFormAdmin extends NewGameFormPlayer {
-  memory_gb: number;        // 例: 10
+  memory_gb: number; // 例: 10
   instance_types: string[]; // 既定: ["r7a.large", "r6a.large"]
-  ebs_size_gb: number;      // 既定: 30
+  ebs_size_gb: number; // 既定: 30
   spot_max_price_jpy_per_hour: number | null;
 }
 
@@ -286,18 +294,19 @@ const COST_FIELD_DEFAULTS = {
 
 すべて `/admin/api/` 配下、Cookie 認証必須。**tier** 列は最低要求権限 (player は admin より狭い)。
 
-| Method | Path | 用途 | tier | 副作用 |
-|---|---|---|---|---|
-| `GET` | `/admin/api/games` | game 一覧 (KV scan) | player | なし |
-| `GET` | `/admin/api/games/:id` | 単体取得 | player | なし |
-| `PUT` | `/admin/api/games/:id` | 更新。**コスト系 fields (instance_types / ebs_size_gb / spot_max_price / MEMORY) は admin のみ採用、player は無視**。`CF_FILE_ID`/version 等の非コスト fields は player も可 | player (コスト fields は admin) | KV write |
-| `POST` | `/admin/api/games` | 新規追加。player はコスト fields を `COST_FIELD_DEFAULTS` で固定 (§5.3) | player | CF DNS A 作成 + S3 prefix 作成 + KV put |
-| `POST` | `/admin/api/games/:id/start` | 起動 | player | **Service Binding RPC** `env.DISCORD_HANDLER.start(id)` (AWS) |
-| `POST` | `/admin/api/games/:id/stop` | 停止 | player | **Service Binding RPC** `env.DISCORD_HANDLER.stop(id)` (AWS) |
-| `GET` | `/admin/api/games/:id/status` | 状態取得 | player | **Service Binding RPC** `env.DISCORD_HANDLER.status(id)` (EC2 describe) + KV state read |
-| `GET` | `/admin/api/modpacks/search?q=` | CF API search proxy | player | CF API 1 call (admin-webui 直) |
-| `GET` | `/admin/api/modpacks/by-slug/:slug` | slug → 詳細 + バージョン一覧 | player | CF API 2 call (admin-webui 直) |
-| `POST` | `/admin/api/auth/logout` | session 失効 | player | KV delete (admin-webui 直) |
+| Method | Path                                | 用途                                                                                                                                                                         | tier                            | 副作用                                                                                  |
+| ------ | ----------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------- | --------------------------------------------------------------------------------------- |
+| `GET`  | `/admin/api/games`                  | game 一覧 (KV scan)                                                                                                                                                          | player                          | なし                                                                                    |
+| `GET`  | `/admin/api/games/:id`              | 単体取得                                                                                                                                                                     | player                          | なし                                                                                    |
+| `PUT`  | `/admin/api/games/:id`              | 更新。**コスト系 fields (instance_types / ebs_size_gb / spot_max_price / MEMORY) は admin のみ採用、player は無視**。`CF_FILE_ID`/version 等の非コスト fields は player も可 | player (コスト fields は admin) | KV write                                                                                |
+| `POST` | `/admin/api/games`                  | 新規追加。player はコスト fields を `COST_FIELD_DEFAULTS` で固定 (§5.3)                                                                                                      | player                          | CF DNS A 作成 + S3 prefix 作成 + KV put                                                 |
+| `POST` | `/admin/api/games/:id/start`        | 起動                                                                                                                                                                         | player                          | **Service Binding RPC** `env.DISCORD_HANDLER.start(id)` (AWS)                           |
+| `POST` | `/admin/api/games/:id/stop`         | 停止                                                                                                                                                                         | player                          | **Service Binding RPC** `env.DISCORD_HANDLER.stop(id)` (AWS)                            |
+| `GET`  | `/admin/api/games/:id/status`       | 状態取得                                                                                                                                                                     | player                          | **Service Binding RPC** `env.DISCORD_HANDLER.status(id)` (EC2 describe) + KV state read |
+| `GET`  | `/admin/api/modpacks/search?q=`     | CF API search proxy                                                                                                                                                          | player                          | CF API 1 call (admin-webui 直)                                                          |
+| `GET`  | `/admin/api/modpacks/by-slug/:slug` | slug → 詳細 + バージョン一覧                                                                                                                                                 | player                          | CF API 2 call (admin-webui 直)                                                          |
+| `GET`  | `/admin/api/auth/session`           | whoami。SPA がコスト fields の表示可否を決めるため tier を返す (`{userId, tier}`)。**表示制御は UX、実 enforcement は PUT 側 applyGameUpdate** (§9.1 #2b)                    | player                          | なし                                                                                    |
+| `POST` | `/admin/api/auth/logout`            | session 失効                                                                                                                                                                 | player                          | KV delete (admin-webui 直)                                                              |
 
 ### 6.1 AWS 操作の委譲 (Service Binding) と重複排除
 
@@ -431,6 +440,7 @@ discord-handler 側 `wrangler.toml` には `ADMIN_AUTH` の bind 追加 (`/panel
 **調査結果**: HEAD の committed registry.json で placeholder 化されている field は **`cf_record_id` ただ 1 つ**。subdomain / config_s3_prefix (bucket 名) / SSM パス / instance_types / env は**すべて既に実値で公開済み**。つまり registry.json の機密性 surface は `cf_record_id` のみ。そして `cf_record_id` は **Cloudflare が A レコード作成時に返す runtime 割当 ID** (起動毎の DNS 更新に使う handle) であり、source config ではなく **runtime state**。
 
 **決定 (Option B+)**:
+
 1. **`cf_record_id` を registry.json から KV (`SERVER_STATE`) へ移す**。register-game.mjs / WebUI 新規追加がレコード作成時に受け取った id を KV に書き、DNS 更新ロジックは KV から読む
 2. これで registry.json に機密 field が **ゼロ** になる → **実値で commit、skip-worktree を撤廃**
 3. 撤廃は 1 度のクリーンアップ commit (`git update-index --no-skip-worktree games/*/registry.json` → 実値 commit)。infra/wrangler の 5 ファイルは Phase 7 と無関係なので skip-worktree 据え置き
@@ -458,26 +468,26 @@ ADR 0003 の議論を要約 + Phase 7 特有の項目:
 
 ### 9.1 自分で対策する項目
 
-| # | リスク | 対策 |
-|---|---|---|
-| 1 | `/panel` 応答に EPHEMERAL flag を忘れる (**load-bearing**: token は bearer で allowlist は漏洩を止めない → チャンネル全員が 5 分以内にクリックすれば発行者として入れる) | unit test で `flags: 64` を assert (最重要) |
-| 1b | token 漏洩一般 (履歴 / proxy / 肩越し) | one-shot + TTL 300s + `history.replaceState` + link button UI。allowlist では止まらない前提で多層化 |
-| 2 | allowlist env (`ADMIN_*` / `PLAYER_*`) の空文字列・typo で fail-open | どちらにも無い user は `/auth` で reject (fail-closed)。`ADMIN_DISCORD_USER_IDS` は最低 1 件を init で assert (player list は空でも可 = admin 専用運用) |
-| 2b | **player が API を直接叩いてコスト fields を書き換える** (UI 非表示は迂回可能) | サーバ側で tier を判定し、player の instance_types/ebs/spot/MEMORY 書き込みは無視 or 403。**UI 非表示に依存しない** (§1.1 / §5.3 / §6) |
-| 3 | admin endpoint / field で auth・tier check 漏れ | `withAdminAuth(handler)` + コスト系は `withTier('admin')` を bolt-on。tier はテストで player→403 を assert |
-| 4 | URL の token がブラウザ履歴に残る | `/auth` HTML で `history.replaceState` を即実行 |
-| 5 | XSS による cookie 自動付与攻撃 | CSP `script-src 'self'` + 状態変更 API は `X-Requested-With` header 要求 |
-| 6 | wrangler tail で `?t=xxx` が見える | `/auth` handler 内で token を log redact |
-| 7 | KV の 1-shot 保証が race condition で破れる | KV は eventually-consistent。実害「同一ユーザーの 2 セッション」のみで軽微、許容 |
-| 8 | session 24h が長すぎてデバイス紛失時に被害 | `/panel logout` (Discord 経由) で全 session revoke 可能に (sid 列挙の仕組みは §4.4 で要設計) |
+| #   | リスク                                                                                                                                                                  | 対策                                                                                                                                                    |
+| --- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | `/panel` 応答に EPHEMERAL flag を忘れる (**load-bearing**: token は bearer で allowlist は漏洩を止めない → チャンネル全員が 5 分以内にクリックすれば発行者として入れる) | unit test で `flags: 64` を assert (最重要)                                                                                                             |
+| 1b  | token 漏洩一般 (履歴 / proxy / 肩越し)                                                                                                                                  | one-shot + TTL 300s + `history.replaceState` + link button UI。allowlist では止まらない前提で多層化                                                     |
+| 2   | allowlist env (`ADMIN_*` / `PLAYER_*`) の空文字列・typo で fail-open                                                                                                    | どちらにも無い user は `/auth` で reject (fail-closed)。`ADMIN_DISCORD_USER_IDS` は最低 1 件を init で assert (player list は空でも可 = admin 専用運用) |
+| 2b  | **player が API を直接叩いてコスト fields を書き換える** (UI 非表示は迂回可能)                                                                                          | サーバ側で tier を判定し、player の instance_types/ebs/spot/MEMORY 書き込みは無視 or 403。**UI 非表示に依存しない** (§1.1 / §5.3 / §6)                  |
+| 3   | admin endpoint / field で auth・tier check 漏れ                                                                                                                         | `withAdminAuth(handler)` + コスト系は `withTier('admin')` を bolt-on。tier はテストで player→403 を assert                                              |
+| 4   | URL の token がブラウザ履歴に残る                                                                                                                                       | `/auth` HTML で `history.replaceState` を即実行                                                                                                         |
+| 5   | XSS による cookie 自動付与攻撃                                                                                                                                          | CSP `script-src 'self'` + 状態変更 API は `X-Requested-With` header 要求                                                                                |
+| 6   | wrangler tail で `?t=xxx` が見える                                                                                                                                      | `/auth` handler 内で token を log redact                                                                                                                |
+| 7   | KV の 1-shot 保証が race condition で破れる                                                                                                                             | KV は eventually-consistent。実害「同一ユーザーの 2 セッション」のみで軽微、許容                                                                        |
+| 8   | session 24h が長すぎてデバイス紛失時に被害                                                                                                                              | `/panel logout` (Discord 経由) で全 session revoke 可能に (sid 列挙の仕組みは §4.4 で要設計)                                                            |
 
 ### 9.2 自分では完全防御できないリスク
 
-| # | リスク | 評価 |
-|---|---|---|
-| 9 | Discord アカウント侵害 | 2FA 必須運用。これは OAuth でも同等 |
-| 10 | Cloudflare アカウント侵害 | 2FA + hardware key 必須運用。同上 |
-| 11 | ブラウザ拡張による cookie 横取り | Web 共通の制約、対策困難 |
+| #   | リスク                           | 評価                                |
+| --- | -------------------------------- | ----------------------------------- |
+| 9   | Discord アカウント侵害           | 2FA 必須運用。これは OAuth でも同等 |
+| 10  | Cloudflare アカウント侵害        | 2FA + hardware key 必須運用。同上   |
+| 11  | ブラウザ拡張による cookie 横取り | Web 共通の制約、対策困難            |
 
 ### 9.3 IAM 影響範囲
 
@@ -500,23 +510,23 @@ rev1 では「ATM10 AUTO_CURSEFORGE の end-to-end 検証 (Phase A)」を全 Ste
 
 ### 10.1 Step 一覧
 
-| Step | 内容 | 推定 | 依存 |
-|---|---|---|---|
-| **B-0a** | `packages/shared/` (`@gs/shared`) を切り、discord-handler の `GameDefinition` 等の型を移植 (元は re-export に) + pnpm-workspace.yaml に `packages/*` 追加。registry-types / rpc-types / build.ts の骨組み | 2h | なし |
-| **B-0b** | `workers/admin-webui/` scaffold (wrangler.toml: assets + KV bind + DISCORD_HANDLER service binding entrypoint)、独自ドメイン `gs-admin.<base-domain>` 割当、空 deploy 疎通 | 2h | B-0a |
-| **B-1** | CurseForge API client (`admin-webui/src/lib/curseforge/`) 実装 + 単体テスト | 2h | B-0b |
-| **B-2** | Magic link auth: `admin-webui` の `lib/auth/admin-session.ts` + `handlers/auth.ts` (session/tier) と、discord-handler の `handlers/discord/panel.ts` (token 発行 + ephemeral button、ADMIN_AUTH bind) | 4h | B-0b |
-| **B-3** | `/admin/api/games` (GET 一覧, GET 単体, PUT 更新) + auth/tier middleware | 3h | B-2 |
-| **B-4** | curl で B-1〜B-3 の疎通確認 (cookie / tier 403 含む) | 1h | B-3 |
-| **C-1** | SPA 雛形 (Vite + Svelte + `/games` 一覧 + ダミーデータで動作) | 3h | B-4 |
-| **C-2** | `/games/:id` 編集 UI (CF_FILE_ID/version。コスト fields は admin のみ表示) | 3h | C-1 |
-| **C-3** | admin-webui の `[assets]` deploy 疎通 (SPA + API が同一オリジンで動く) | 2h | C-2 |
-| **D-1** | `/admin/api/modpacks/search` + `/by-slug/:slug` | 2h | C-3 |
-| **D-2** | `/admin/api/games` POST (新規追加) + DNS (admin-webui 直) / KV / **S3 sync は Service Binding RPC** (`register-game.mjs` の主要処理を `@gs/shared` の `build.ts` に移植、`(form, tier)` 対応) | 5h | D-1 |
-| **D-3** | SPA: modpack 検索 UI + 新規追加 form。**初回の実追加で AUTO_CURSEFORGE 経路 (空 EBS → modpack DL → 起動) と `CF_FILE_ID` 切替挙動を併せて確認 = 旧 Phase A の代替検証** | 4h | D-2 |
-| **E-1** | discord-handler: `lib/orchestrator/start.ts` `stop.ts` 切り出し + `internal-rpc.ts` (`InternalRpc extends WorkerEntrypoint`、start/stop/status/s3Sync) + Discord handler の refactor | 4h | D-3 |
-| **E-2** | admin-webui `/admin/api/games/:id/{start,stop,status}` (`env.DISCORD_HANDLER.*` RPC を呼ぶ) + SPA: ops 画面 | 4h | E-1 |
-| **F** | `scripts/export-registry.mjs` (KV → Git audit) + 月次運用手順を runbook に追記 | 2h | E-2 |
+| Step     | 内容                                                                                                                                                                                                      | 推定 | 依存 |
+| -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---- | ---- |
+| **B-0a** | `packages/shared/` (`@gs/shared`) を切り、discord-handler の `GameDefinition` 等の型を移植 (元は re-export に) + pnpm-workspace.yaml に `packages/*` 追加。registry-types / rpc-types / build.ts の骨組み | 2h   | なし |
+| **B-0b** | `workers/admin-webui/` scaffold (wrangler.toml: assets + KV bind + DISCORD_HANDLER service binding entrypoint)、独自ドメイン `gs-admin.<base-domain>` 割当、空 deploy 疎通                                | 2h   | B-0a |
+| **B-1**  | CurseForge API client (`admin-webui/src/lib/curseforge/`) 実装 + 単体テスト                                                                                                                               | 2h   | B-0b |
+| **B-2**  | Magic link auth: `admin-webui` の `lib/auth/admin-session.ts` + `handlers/auth.ts` (session/tier) と、discord-handler の `handlers/discord/panel.ts` (token 発行 + ephemeral button、ADMIN_AUTH bind)     | 4h   | B-0b |
+| **B-3**  | `/admin/api/games` (GET 一覧, GET 単体, PUT 更新) + auth/tier middleware                                                                                                                                  | 3h   | B-2  |
+| **B-4**  | curl で B-1〜B-3 の疎通確認 (cookie / tier 403 含む)                                                                                                                                                      | 1h   | B-3  |
+| **C-1**  | SPA 雛形 (Vite + Svelte + `/games` 一覧 + ダミーデータで動作)                                                                                                                                             | 3h   | B-4  |
+| **C-2**  | `/games/:id` 編集 UI (CF_FILE_ID/version。コスト fields は admin のみ表示)                                                                                                                                | 3h   | C-1  |
+| **C-3**  | admin-webui の `[assets]` deploy 疎通 (SPA + API が同一オリジンで動く)                                                                                                                                    | 2h   | C-2  |
+| **D-1**  | `/admin/api/modpacks/search` + `/by-slug/:slug`                                                                                                                                                           | 2h   | C-3  |
+| **D-2**  | `/admin/api/games` POST (新規追加) + DNS (admin-webui 直) / KV / **S3 sync は Service Binding RPC** (`register-game.mjs` の主要処理を `@gs/shared` の `build.ts` に移植、`(form, tier)` 対応)             | 5h   | D-1  |
+| **D-3**  | SPA: modpack 検索 UI + 新規追加 form。**初回の実追加で AUTO_CURSEFORGE 経路 (空 EBS → modpack DL → 起動) と `CF_FILE_ID` 切替挙動を併せて確認 = 旧 Phase A の代替検証**                                   | 4h   | D-2  |
+| **E-1**  | discord-handler: `lib/orchestrator/start.ts` `stop.ts` 切り出し + `internal-rpc.ts` (`InternalRpc extends WorkerEntrypoint`、start/stop/status/s3Sync) + Discord handler の refactor                      | 4h   | D-3  |
+| **E-2**  | admin-webui `/admin/api/games/:id/{start,stop,status}` (`env.DISCORD_HANDLER.*` RPC を呼ぶ) + SPA: ops 画面                                                                                               | 4h   | E-1  |
+| **F**    | `scripts/export-registry.mjs` (KV → Git audit) + 月次運用手順を runbook に追記                                                                                                                            | 2h   | E-2  |
 
 **Total**: ~43h。MVP (B-0a〜C-3 まで = 既存 game の version 編集が WebUI でできる状態) なら ~22h。
 
@@ -547,6 +557,7 @@ rev1 では「ATM10 AUTO_CURSEFORGE の end-to-end 検証 (Phase A)」を全 Ste
 ### 11.5 独自ドメイン (分離で事実上確定)
 
 ADR 0004 で admin-webui を別 Worker にしたため、**独自ドメイン `gs-admin.<base-domain>` への割当が前提**になった (B-0)。理由は 3 つ:
+
 - `Secure; HttpOnly; SameSite=Strict` cookie は HTTPS 必須 (workers.dev でも HTTPS だが下記 WAF 制約あり)
 - `*.workers.dev` には zone WAF / rate limit が効かない ([[workers-dev-no-zone-waf]])
 - SPA と API を同一オリジンに揃える (cookie の取り回し)

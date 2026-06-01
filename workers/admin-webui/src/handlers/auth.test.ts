@@ -126,6 +126,53 @@ describe("GET /auth (magic link landing)", () => {
   });
 });
 
+describe("GET /admin/api/auth/session (whoami)", () => {
+  it("returns 401 without a valid session", async () => {
+    const { kv } = makeKv();
+    const req = new Request(
+      "https://gs-admin.example.com/admin/api/auth/session",
+    );
+    const res = await handleAuth(req, makeEnv(kv), ctx);
+    expect(res.status).toBe(401);
+  });
+
+  it("returns admin tier for a user in the admin allowlist", async () => {
+    const { kv } = makeKv({
+      [adminSessionKey("s1")]: JSON.stringify(session("111")),
+    });
+    const req = new Request(
+      "https://gs-admin.example.com/admin/api/auth/session",
+      { headers: { cookie: `${SESSION_COOKIE}=s1` } },
+    );
+    const res = await handleAuth(req, makeEnv(kv, "111", "222"), ctx);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ userId: "111", tier: "admin" });
+  });
+
+  it("returns player tier for a user in the player allowlist", async () => {
+    const { kv } = makeKv({
+      [adminSessionKey("s2")]: JSON.stringify(session("222")),
+    });
+    const req = new Request(
+      "https://gs-admin.example.com/admin/api/auth/session",
+      { headers: { cookie: `${SESSION_COOKIE}=s2` } },
+    );
+    const res = await handleAuth(req, makeEnv(kv, "111", "222"), ctx);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ userId: "222", tier: "player" });
+  });
+
+  it("rejects non-GET (405)", async () => {
+    const { kv } = makeKv();
+    const req = new Request(
+      "https://gs-admin.example.com/admin/api/auth/session",
+      { method: "POST" },
+    );
+    const res = await handleAuth(req, makeEnv(kv), ctx);
+    expect(res.status).toBe(405);
+  });
+});
+
 describe("POST /admin/api/auth/logout", () => {
   it("deletes the session and clears the cookie", async () => {
     const { kv, store } = makeKv({

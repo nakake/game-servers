@@ -11,6 +11,7 @@
 
 import { deriveTier, generateOpaqueToken } from "@gs/shared/auth-types";
 import {
+  authenticate,
   clearSessionCookie,
   consumeAdminToken,
   createSession,
@@ -28,10 +29,37 @@ export async function handleAuth(
   if (url.pathname === "/auth") {
     return handleLanding(request, env, url);
   }
+  if (url.pathname === "/admin/api/auth/session") {
+    return handleSession(request, env);
+  }
   if (url.pathname === "/admin/api/auth/logout") {
     return handleLogout(request, env);
   }
   return jsonError(404, "unknown auth route");
+}
+
+// GET /admin/api/auth/session — 現 session の whoami。
+// SPA が tier を知り、コスト系 field の表示/非表示を決めるために使う (docs §6 / §7)。
+// **UI 非表示は UX に過ぎず、実 enforcement はサーバ側 applyGameUpdate が行う** (§9.1 #2b)。
+// tier は authenticate() が毎回 allowlist から再導出する (session には焼かない)。
+async function handleSession(request: Request, env: Env): Promise<Response> {
+  if (request.method !== "GET") {
+    return jsonError(405, "method not allowed");
+  }
+  const auth = await authenticate(env, request);
+  if (auth === null) {
+    return jsonError(401, "unauthorized");
+  }
+  return new Response(
+    JSON.stringify({ userId: auth.userId, tier: auth.tier }),
+    {
+      status: 200,
+      headers: {
+        "content-type": "application/json",
+        "cache-control": "no-store",
+      },
+    },
+  );
 }
 
 // GET /auth?t=<token>
