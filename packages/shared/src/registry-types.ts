@@ -68,11 +68,14 @@ export interface GameDefinition {
 
 // ---- Phase 7: WebUI からの新規ゲーム追加フォーム (docs §5.3) ----
 
+// modpack の mod loader。itzg の TYPE と CurseForge の gameVersions 表記の橋渡しに使う。
+export type ModLoader = "NEOFORGE" | "FORGE" | "FABRIC" | "QUILT";
+
 // CurseForge 由来のメタ。UI 表示用キャッシュであり registry には保存しない。
 export interface ModpackMeta {
   modId: number;
   minecraftVersion: string;
-  modLoader: "NEOFORGE" | "FORGE" | "FABRIC" | "QUILT";
+  modLoader: ModLoader;
 }
 
 // player / admin 共通で入力できる field。

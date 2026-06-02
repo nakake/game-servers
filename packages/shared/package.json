@@ -7,6 +7,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./registry-types": "./src/registry-types.ts",
+    "./modpack-types": "./src/modpack-types.ts",
     "./rpc-types": "./src/rpc-types.ts",
     "./auth-types": "./src/auth-types.ts",
     "./build": "./src/build.ts"

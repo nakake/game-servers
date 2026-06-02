@@ -41,9 +41,16 @@
   function open(id: string): void {
     navigate(`/games/${encodeURIComponent(id)}`);
   }
+
+  function goNew(): void {
+    navigate("/games/new");
+  }
 </script>
 
-<h2>ゲーム一覧</h2>
+<div class="list-head">
+  <h2>ゲーム一覧</h2>
+  <button type="button" class="add-btn" on:click={goNew}>+ 新規追加</button>
+</div>
 
 {#if usingDummy}
   <div class="banner">

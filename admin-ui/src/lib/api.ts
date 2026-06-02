@@ -3,6 +3,7 @@
 // 認証は Cookie session 前提なので credentials: same-origin。状態変更系 (PUT/POST) は
 // X-Requested-With を付ける (CSRF 軽減、docs §4.3 / §9.1 #5)。
 import type { GameDefinition, Tier } from "@gs/shared/registry-types";
+import type { ModpackFile, ModpackSummary } from "@gs/shared/modpack-types";
 
 const API_BASE = "/admin/api";
 
@@ -80,4 +81,34 @@ export async function updateGame(
 // 現 session の whoami。tier に応じて UI のコスト系 field 表示を切り替える (docs §6 / §7)。
 export async function getSession(): Promise<{ userId: string; tier: Tier }> {
   return apiGet<{ userId: string; tier: Tier }>("/auth/session");
+}
+
+// ---- modpack 検索 (新規追加フロー、D-1 endpoint を叩く) ----
+
+// keyword で CurseForge modpack を検索。handlers/modpacks.ts が { modpacks } を返す。
+export async function searchModpacks(
+  keyword: string,
+): Promise<ModpackSummary[]> {
+  const body = await apiGet<{ modpacks: ModpackSummary[] }>(
+    `/modpacks/search?q=${encodeURIComponent(keyword)}`,
+  );
+  return body.modpacks;
+}
+
+// slug → メタ + 版一覧。handlers/modpacks.ts が { modpack, files } を返す。未存在は ApiError(404)。
+export async function getModpackBySlug(
+  slug: string,
+): Promise<{ modpack: ModpackSummary; files: ModpackFile[] }> {
+  return apiGet<{ modpack: ModpackSummary; files: ModpackFile[] }>(
+    `/modpacks/by-slug/${encodeURIComponent(slug)}`,
+  );
+}
+
+// 新規ゲーム追加 (D-2)。サーバが validate → DNS A 作成 → KV put し、作られた game を返す
+// ({ game: ... }、handlers/games.ts postHandler / buildGameDefinition)。失敗は ApiError。
+export async function createGame(
+  form: Record<string, unknown>,
+): Promise<GameDefinition> {
+  const body = await apiSend<{ game: GameDefinition }>("POST", "/games", form);
+  return body.game;
 }

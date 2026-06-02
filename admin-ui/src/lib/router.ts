@@ -8,17 +8,23 @@ import { readable } from "svelte/store";
 export interface Route {
   // 正規化済みパス (末尾スラッシュ除去)。
   path: string;
-  // /games/:id の id 部分。一覧 (/ や /games) では null。
+  // /games/:id の id 部分。一覧 (/ や /games) や新規追加では null。
   gameId: string | null;
+  // /games/new (新規追加フォーム) か。
+  isNew: boolean;
 }
 
 function parse(pathname: string): Route {
   const path = pathname.replace(/\/+$/, "") || "/";
+  // /games/new は :id より先に判定する (gameId="new" と誤解釈させない)。
+  if (path === "/games/new") {
+    return { path, gameId: null, isNew: true };
+  }
   const m = path.match(/^\/games\/([^/]+)$/);
   if (m !== null) {
-    return { path, gameId: decodeURIComponent(m[1]!) };
+    return { path, gameId: decodeURIComponent(m[1]!), isNew: false };
   }
-  return { path, gameId: null };
+  return { path, gameId: null, isNew: false };
 }
 
 // 現在のルート。popstate (ブラウザの戻る/進む) と navigate() で更新される。

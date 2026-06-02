@@ -4,6 +4,7 @@
   import { session, loadSession, previewTier } from "./lib/session";
   import Games from "./routes/Games.svelte";
   import GameDetail from "./routes/GameDetail.svelte";
+  import NewGame from "./routes/NewGame.svelte";
 
   onMount(loadSession);
 
@@ -47,6 +48,8 @@
       </p>
       <p class="muted">リンクは発行から 5 分間・1 回のみ有効です。</p>
     </div>
+  {:else if $route.isNew}
+    <NewGame />
   {:else if $route.gameId !== null}
     <GameDetail gameId={$route.gameId} />
   {:else}
