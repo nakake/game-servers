@@ -26,12 +26,16 @@ routes = [{ pattern = "gs-admin.<YOUR_BASE_DOMAIN>", custom_domain = true }]
 enabled = true
 
 # ---- Static Assets (SPA) ----
-# Vite build 出力を配信。admin-webui には外来ルートが無いので not_found_handling=SPA を
-# 素直に使える (discord-handler 同居時のような run_worker_first の小細工は不要、ADR 0004)。
+# Vite build 出力を配信。
+# ★ /auth (magic link 着地) と /admin/api/* は Worker (index.ts) が処理する HTML/JSON ルート。
+#   not_found_handling=SPA だけだとブラウザの HTML ナビゲーション (/auth 等) が index.html に
+#   飲まれ Worker が動かない (C-3 で判明、当初 ADR 0004 の「外来ルート無し」前提は誤り)。
+#   run_worker_first=true で Worker を先に通し、index.ts が振り分ける (静的は env.ASSETS.fetch)。
 [assets]
 directory = "./public"
 binding = "ASSETS"
 not_found_handling = "single-page-application"
+run_worker_first = true
 
 # ---- SPA build の deploy 結合 (C-1 で有効化済) ----
 # CI 不在のため deploy 時に必ず build を走らせ、空/古い public/ の deploy 事故を防ぐ (docs §11.7)。

@@ -17,8 +17,9 @@
   <h1><a href="/games" on:click={goHome}>gs-admin</a></h1>
   <span class="sub">modpack 管理</span>
   <span class="spacer" />
-  {#if $session !== null}
-    <span class="pill {$session.tier === 'admin' ? 'on' : ''}">{$session.tier}</span>
+  {#if $session !== null && $session.authed}
+    <span class="pill {$session.tier === 'admin' ? 'on' : ''}">{$session.tier}</span
+    >
     {#if $session.usingDummy}
       <span class="dummy-toggle">
         <button
@@ -35,7 +36,18 @@
 </header>
 
 <main>
-  {#if $route.gameId !== null}
+  {#if $session === null}
+    <p class="muted">読み込み中…</p>
+  {:else if !$session.authed}
+    <div class="login-required">
+      <h2>ログインが必要です</h2>
+      <p class="muted">
+        この画面は管理者・プレイヤー専用です。Discord で <code>/panel</code>
+        を実行し、表示されたリンク（自分だけに見える）から入り直してください。
+      </p>
+      <p class="muted">リンクは発行から 5 分間・1 回のみ有効です。</p>
+    </div>
+  {:else if $route.gameId !== null}
     <GameDetail gameId={$route.gameId} />
   {:else}
     <Games />

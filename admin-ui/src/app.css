@@ -91,6 +91,19 @@ main {
   font-size: 0.88rem;
 }
 
+.login-required {
+  max-width: 560px;
+  margin: 3rem auto;
+  text-align: center;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 2rem 1.5rem;
+}
+.login-required h2 {
+  margin-top: 0;
+}
+
 .muted {
   color: var(--muted);
 }

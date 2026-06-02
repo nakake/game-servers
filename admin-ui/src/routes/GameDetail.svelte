@@ -14,6 +14,7 @@
   // GET が失敗し dummy にフォールバックしているか (保存も local 反映に切り替える)。
   let gameDummy = false;
   let notFound = false;
+  let loadError: string | null = null;
 
   let saving = false;
   let saveMsg: string | null = null;
@@ -50,16 +51,30 @@
     loading = true;
     notFound = false;
     gameDummy = false;
+    loadError = null;
     saveMsg = null;
     saveErr = null;
     try {
       game = await getGame(gameId);
-    } catch {
-      // C-1/C-2 demo: API 不在時は dummy から探す (docs §10.1)。
-      const found = DUMMY_GAMES.find((g) => g.game_id === gameId) ?? null;
-      game = found;
-      gameDummy = true;
-      notFound = found === null;
+    } catch (e) {
+      if (e instanceof ApiError) {
+        // サーバ応答あり。dummy は出さない。
+        game = null;
+        if (e.status === 404) {
+          notFound = true;
+        } else {
+          loadError =
+            e.status === 401
+              ? "セッションが切れました。Discord で /panel を実行して入り直してください。"
+              : `読み込みに失敗しました (HTTP ${e.status})`;
+        }
+      } else {
+        // fetch 失敗 = バックエンド不在 (vite dev 単体) のみ dummy (docs §10.1)。
+        const found = DUMMY_GAMES.find((g) => g.game_id === gameId) ?? null;
+        game = found;
+        gameDummy = true;
+        notFound = found === null;
+      }
     } finally {
       loading = false;
       if (game !== null) initForm(game);
@@ -168,6 +183,8 @@
 
 {#if loading}
   <p class="muted">読み込み中…</p>
+{:else if loadError}
+  <p class="muted">{loadError}</p>
 {:else if notFound || game === null}
   <p class="muted">ゲーム <code>{gameId}</code> は見つかりませんでした。</p>
 {:else}

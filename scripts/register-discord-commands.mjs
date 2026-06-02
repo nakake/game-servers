@@ -80,6 +80,14 @@ const commands = [
     type: 1,
     integration_types: GUILD_INSTALL_ONLY,
   },
+  {
+    // Phase 7: modpack 管理 WebUI への magic link を ephemeral で発行する (ADR 0003)。
+    // ハンドラは handlers/discord/panel.ts、token は ADMIN_AUTH KV に put される。
+    name: "panel",
+    description: "modpack 管理 WebUI を開く (ログインリンクを自分だけに表示)",
+    type: 1,
+    integration_types: GUILD_INSTALL_ONLY,
+  },
 ];
 
 const url = isGlobal

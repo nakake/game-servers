@@ -1,15 +1,22 @@
-// 現 session の tier を保持する store。
+// 現 session の状態を保持する store。
 //
 // tier に応じてコスト系 field の表示/非表示を決める (docs §7、§1.1)。ただし**これは UX に
-// 過ぎず、実 enforcement はサーバ側 applyGameUpdate が行う** (§9.1 #2b)。player が直接 API を
-// 叩いてコスト field を書き換えても無視される。
+// 過ぎず、実 enforcement はサーバ側 applyGameUpdate が行う** (§9.1 #2b)。
+//
+// 認証状態は 3 つに分ける:
+//   - authed=true,  usingDummy=false : ログイン済 (実データ)
+//   - authed=false                   : 未ログイン (API が 401)。**ダミーは出さずログイン誘導**
+//   - authed=true,  usingDummy=true  : バックエンド不在 (vite dev 単体)。dev 用に dummy 動作
 import { writable } from "svelte/store";
 import type { Tier } from "@gs/shared/registry-types";
-import { getSession } from "./api";
+import { getSession, ApiError } from "./api";
 
 export interface SessionState {
+  // false = 未ログイン (API が 401 を返した)。本番でこの状態のときは偽データを見せない。
+  authed: boolean;
+  // authed=true のときのみ意味を持つ。
   tier: Tier;
-  // API 不在 (vite dev 単体 / 未 deploy) で dummy フォールバックしているか。
+  // バックエンド不在 (ローカル dev) で dummy 動作中か。本番では false。
   usingDummy: boolean;
 }
 
@@ -19,10 +26,16 @@ export const session = writable<SessionState | null>(null);
 export async function loadSession(): Promise<void> {
   try {
     const s = await getSession();
-    session.set({ tier: s.tier, usingDummy: false });
-  } catch {
-    // API 不在時は admin として全 field を表示する (player 表示は previewTier で確認可)。
-    session.set({ tier: "admin", usingDummy: true });
+    session.set({ authed: true, tier: s.tier, usingDummy: false });
+  } catch (e) {
+    if (e instanceof ApiError) {
+      // サーバは応答している (デプロイ済) が未認証。401 等 → 未ログイン。
+      // ここで dummy を出さない (未ログインに偽データを見せず、ログインへ誘導する)。
+      session.set({ authed: false, tier: "player", usingDummy: false });
+    } else {
+      // fetch 自体が失敗 = バックエンド不在 (vite dev 単体)。dev 用に dummy で動かす。
+      session.set({ authed: true, tier: "admin", usingDummy: true });
+    }
   }
 }
 
