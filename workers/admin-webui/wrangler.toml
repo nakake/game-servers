@@ -6,7 +6,7 @@
 # このファイルは公開リポジトリに含まれるため値は placeholder。実値はローカル作業ツリーに
 # 入れ `git update-index --skip-worktree` で git から隠す (docs placeholder-skip-worktree 運用)。
 #
-# 本番デプロイは `pnpm deploy` (要 Cloudflare アカウント + wrangler login)。
+# 本番デプロイは `pnpm run deploy` (要 Cloudflare アカウント + wrangler login)。
 # ローカル開発は `pnpm dev`。
 
 name = "gs-admin-webui"
@@ -14,13 +14,16 @@ main = "src/index.ts"
 compatibility_date = "2026-05-01"
 compatibility_flags = ["nodejs_compat"]
 
+# 独自ドメイン割当 (docs §11.5)。*.workers.dev には zone WAF が効かず、Secure cookie /
+# 同一オリジン運用のため独自ホストが前提。
+# ★ TOML 注意: top-level の `routes` は **必ず最初の [table] ヘッダより前** に置く。
+#   [observability] の後ろに書くと TOML 仕様で observability.routes と解釈され、wrangler が
+#   custom domain を作らず workers.dev だけになる (DNS が NXDOMAIN のまま)。
+routes = [{ pattern = "gs-admin.<YOUR_BASE_DOMAIN>", custom_domain = true }]
+
 # 本番ログを Cloudflare dashboard で見るために有効化 (Workers Logs)。
 [observability]
 enabled = true
-
-# 独自ドメイン割当 (docs §11.5)。*.workers.dev には zone WAF が効かず、Secure cookie /
-# 同一オリジン運用のため独自ホストが前提。割当は B-0b の deploy 時に行う (user 操作)。
-routes = [{ pattern = "gs-admin.<YOUR_BASE_DOMAIN>", custom_domain = true }]
 
 # ---- Static Assets (SPA) ----
 # Vite build 出力を配信。admin-webui には外来ルートが無いので not_found_handling=SPA を
