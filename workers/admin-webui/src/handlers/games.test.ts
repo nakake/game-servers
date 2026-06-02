@@ -91,6 +91,9 @@ function makeEnv(opts: {
     ADMIN_AUTH: auth.kv,
     ADMIN_DISCORD_USER_IDS: opts.admins ?? "",
     PLAYER_DISCORD_USER_IDS: opts.players ?? "",
+    CLOUDFLARE_DNS_API_TOKEN: "cf-token",
+    CLOUDFLARE_ZONE_ID: "zone-1",
+    CLOUDFLARE_BASE_DOMAIN: "nakake.com",
   } as unknown as Env;
   return { env, gamesStore: games.store };
 }
@@ -111,7 +114,60 @@ beforeEach(() => {
 });
 afterEach(() => {
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
+
+// Cloudflare DNS の fetch をモックする。GET dns_records → 既存検索、POST → 作成。
+//   existingId !== null なら GET が 1 件返し、create は呼ばれない (冪等パス)。
+function stubDns(
+  opts: { existingId?: string | null; createId?: string } = {},
+): void {
+  const existingId = opts.existingId ?? null;
+  const createId = opts.createId ?? "rec-new";
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (_input: string, init?: RequestInit) => {
+      const method = init?.method ?? "GET";
+      const body =
+        method === "GET"
+          ? { success: true, result: existingId ? [{ id: existingId }] : [] }
+          : { success: true, result: { id: createId } };
+      return new Response(JSON.stringify(body), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }),
+  );
+}
+
+function newGameBody(
+  over: Record<string, unknown> = {},
+): Record<string, unknown> {
+  return {
+    game_id: "atm9",
+    display_name: "All The Mods 9",
+    cf_slug: "all-the-mods-9",
+    cf_modpack_meta: {
+      modId: 426988,
+      minecraftVersion: "1.20.1",
+      modLoader: "FORGE",
+    },
+    ...over,
+  };
+}
+
+function postReq(sid: string, body: unknown, xrw = true): Request {
+  const headers: Record<string, string> = {
+    "content-type": "application/json",
+  };
+  if (xrw) headers["x-requested-with"] = "fetch";
+  return req("/admin/api/games", {
+    method: "POST",
+    sid,
+    headers,
+    body: JSON.stringify(body),
+  });
+}
 
 describe("auth gate", () => {
   it("returns 401 without a session cookie", async () => {
@@ -303,24 +359,121 @@ describe("PUT /admin/api/games/:id", () => {
   });
 });
 
-describe("not-yet-implemented routes", () => {
-  it("POST /admin/api/games → 501 (D-2)", async () => {
+describe("POST /admin/api/games (new game)", () => {
+  it("requires X-Requested-With", async () => {
     const { env } = makeEnv({
       sessions: { s1: session("111") },
       admins: "111",
     });
     const res = await handleGamesApi(
-      req("/admin/api/games", {
-        method: "POST",
-        sid: "s1",
-        headers: { "x-requested-with": "fetch" },
-      }),
+      postReq("s1", newGameBody(), false),
       env,
       ctx,
     );
-    expect(res.status).toBe(501);
+    expect(res.status).toBe(403);
   });
 
+  it("creates a game: DNS A record + KV put, returns 201", async () => {
+    stubDns({ existingId: null, createId: "rec-new" });
+    const { env, gamesStore } = makeEnv({
+      sessions: { s1: session("111") },
+      admins: "111",
+    });
+    const res = await handleGamesApi(postReq("s1", newGameBody()), env, ctx);
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as { game: GameDefinition };
+    expect(body.game.game_id).toBe("atm9");
+    expect(body.game.cf_record_id).toBe("rec-new");
+    expect(body.game.env.MODPACK_PLATFORM).toBe("AUTO_CURSEFORGE");
+    // persisted under the bare game_id key.
+    const persisted = JSON.parse(gamesStore.get("atm9")!) as GameDefinition;
+    expect(persisted.subdomain).toBe("atm9");
+    // DNS was contacted: GET (find) + POST (create) = 2 calls.
+    const fetchMock = globalThis.fetch as unknown as ReturnType<typeof vi.fn>;
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("reuses an existing DNS record (idempotent, no create call)", async () => {
+    stubDns({ existingId: "rec-old" });
+    const { env } = makeEnv({
+      sessions: { s1: session("111") },
+      admins: "111",
+    });
+    const res = await handleGamesApi(postReq("s1", newGameBody()), env, ctx);
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as { game: GameDefinition };
+    expect(body.game.cf_record_id).toBe("rec-old");
+    const fetchMock = globalThis.fetch as unknown as ReturnType<typeof vi.fn>;
+    expect(fetchMock).toHaveBeenCalledTimes(1); // GET only, no POST
+  });
+
+  it("returns 409 when the game_id already exists", async () => {
+    stubDns();
+    const { env } = makeEnv({
+      games: { atm9: baseGame({ game_id: "atm9" }) },
+      sessions: { s1: session("111") },
+      admins: "111",
+    });
+    const res = await handleGamesApi(postReq("s1", newGameBody()), env, ctx);
+    expect(res.status).toBe(409);
+    // no DNS call when the conflict is detected first.
+    expect(globalThis.fetch).not.toHaveBeenCalled();
+  });
+
+  it("returns 400 on an invalid form (bad game_id)", async () => {
+    const { env } = makeEnv({
+      sessions: { s1: session("111") },
+      admins: "111",
+    });
+    const res = await handleGamesApi(
+      postReq("s1", newGameBody({ game_id: "Bad_Id" })),
+      env,
+      ctx,
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it("forces cost defaults for a player creating a game", async () => {
+    stubDns();
+    const { env, gamesStore } = makeEnv({
+      sessions: { s1: session("333") },
+      players: "333",
+    });
+    const res = await handleGamesApi(
+      postReq("s1", newGameBody({ ebs_size_gb: 999, memory_gb: 64 })),
+      env,
+      ctx,
+    );
+    expect(res.status).toBe(201);
+    const persisted = JSON.parse(gamesStore.get("atm9")!) as GameDefinition;
+    expect(persisted.ebs_size_gb).toBe(30); // COST_FIELD_DEFAULTS
+    expect(persisted.env.MEMORY).toBe("8G");
+  });
+
+  it("returns 502 when the Cloudflare DNS API fails", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              success: false,
+              errors: [{ code: 1004, message: "bad" }],
+            }),
+            { status: 400, headers: { "content-type": "application/json" } },
+          ),
+      ),
+    );
+    const { env } = makeEnv({
+      sessions: { s1: session("111") },
+      admins: "111",
+    });
+    const res = await handleGamesApi(postReq("s1", newGameBody()), env, ctx);
+    expect(res.status).toBe(502);
+  });
+});
+
+describe("not-yet-implemented routes", () => {
   it("POST /admin/api/games/:id/start → 501 (E-2)", async () => {
     const { env } = makeEnv({
       games: { atm10: baseGame() },

@@ -11,9 +11,15 @@
 // 全 endpoint で Cookie 認証必須。コスト fields の enforcement は @gs/shared の
 // applyGameUpdate(existing, update, tier) に集約する (docs §5.3 / §6 / §9.1 #2b)。
 
-import { applyGameUpdate } from "@gs/shared/build";
+import {
+  applyGameUpdate,
+  buildGameDefinition,
+  validateNewGameForm,
+} from "@gs/shared/build";
 import type { GameDefinition } from "@gs/shared/registry-types";
 import { authenticate } from "../lib/auth/admin-session.js";
+import { CloudflareDnsClient } from "../lib/cloudflare/dns.js";
+import { CloudflareApiError } from "../lib/cloudflare/errors.js";
 import { getGame, listGames, putGame } from "../lib/registry/store.js";
 import type { Env } from "../env.js";
 
@@ -36,10 +42,7 @@ export async function handleGamesApi(
   // /admin/api/games (一覧 / 新規)
   if (segments.length === 0) {
     if (request.method === "GET") return listHandler(env);
-    if (request.method === "POST") {
-      // D-2 で実装。
-      return jsonError(501, "not implemented (Phase 7 D-2)");
-    }
+    if (request.method === "POST") return postHandler(request, env, auth.tier);
     return jsonError(405, "method not allowed");
   }
 
@@ -97,6 +100,63 @@ async function putHandler(
   const next = applyGameUpdate(existing, update, tier);
   await putGame(env.GAME_REGISTRY, next);
   return json(200, { game: next });
+}
+
+// 新規ゲーム追加 (D-2)。検証 → game_id 重複チェック → DNS A 作成 (admin-webui 直) → KV put。
+//
+// **S3 config sync / SSM rcon password は行わない**: AUTO_CURSEFORGE のゲームは boot 時に
+// itzg が CF から pack を取得するため、追加時点で S3 config は不要。SSM rcon password の
+// provisioning は AWS 操作で admin-webui には鍵が無いため、Service Binding RPC (E-1) 経路で
+// 別途用意する (docs §6.1)。初回の実起動 (D-3) でこの不足が顕在化する想定。
+async function postHandler(
+  request: Request,
+  env: Env,
+  tier: "admin" | "player",
+): Promise<Response> {
+  if (request.headers.get("x-requested-with") === null) {
+    return jsonError(403, "missing X-Requested-With");
+  }
+
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return jsonError(400, "invalid JSON body");
+  }
+
+  const parsed = validateNewGameForm(body);
+  if (!parsed.ok) return jsonError(400, parsed.error);
+  const form = parsed.value;
+
+  // 既存 game_id への上書きを防ぐ (KV put は同 key を黙って上書きするため)。
+  const existing = await getGame(env.GAME_REGISTRY, form.game_id);
+  if (existing !== undefined) {
+    return jsonError(409, `game already exists: ${form.game_id}`);
+  }
+
+  // DNS A レコードを placeholder IP で作成 (冪等)。実 IP は /start 時に書き換わる。
+  const fqdn = `${form.subdomain}.${env.CLOUDFLARE_BASE_DOMAIN}`;
+  const dns = new CloudflareDnsClient({
+    apiToken: env.CLOUDFLARE_DNS_API_TOKEN,
+  });
+  let recordId: string;
+  try {
+    recordId = await dns.ensureARecord({
+      zoneId: env.CLOUDFLARE_ZONE_ID,
+      name: fqdn,
+      comment: `gs-${form.game_id} added via admin-webui`,
+    });
+  } catch (err) {
+    if (err instanceof CloudflareApiError) {
+      return jsonError(502, "cloudflare dns error");
+    }
+    throw err;
+  }
+
+  // 純粋変換で GameDefinition を組み立て (player のコスト field は既定強制) → KV put。
+  const game = buildGameDefinition(form, tier, recordId);
+  await putGame(env.GAME_REGISTRY, game);
+  return json(201, { game });
 }
 
 function json(status: number, body: unknown): Response {

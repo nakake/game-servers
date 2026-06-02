@@ -32,6 +32,15 @@ export interface Env {
   // admin 専用運用なら空でも可。同上 Secret 扱い。
   PLAYER_DISCORD_USER_IDS?: string;
 
+  // ---- Cloudflare DNS (admin-webui 直、ADR 0004 / D-2) ----
+  // 新規ゲーム追加 (POST /admin/api/games) で <subdomain>.<base> の A レコードを作る。
+  // Zone:DNS:Edit 権限の API Token。discord-handler と同一 token を別 secret store に持つ
+  // (鍵隔離の対象は AWS/OIDC のみで、Cloudflare DNS は admin-webui の責務)。Secret 扱い。
+  CLOUDFLARE_DNS_API_TOKEN: string;
+  // DNS レコードを作る zone と base domain。非機密だが wrangler.toml [vars] で投入する。
+  CLOUDFLARE_ZONE_ID: string;
+  CLOUDFLARE_BASE_DOMAIN: string;
+
   // ---- Service Binding (RPC、E-1 で有効化) ----
   // discord-handler が export する InternalRpc (WorkerEntrypoint) への binding。
   // AWS 操作 (start/stop/status/s3Sync) を OIDC 鍵を複製せず委譲する (docs §6.1)。
