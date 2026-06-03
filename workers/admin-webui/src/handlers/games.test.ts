@@ -75,6 +75,8 @@ function makeEnv(opts: {
   sessions?: Record<string, AdminSessionRecord>;
   admins?: string;
   players?: string;
+  // DISCORD_HANDLER RPC stub の差し替え (ops endpoint 用)。省略時は全メソッド ok:true。
+  rpc?: Partial<Env["DISCORD_HANDLER"]>;
 }): { env: Env; gamesStore: Map<string, string> } {
   const gameSeed: Record<string, string> = {};
   for (const [id, g] of Object.entries(opts.games ?? {})) {
@@ -86,6 +88,16 @@ function makeEnv(opts: {
   }
   const games = makeKv(gameSeed);
   const auth = makeKv(sessSeed);
+  const rpc: Env["DISCORD_HANDLER"] = {
+    start: async (id: string) => ({
+      ok: true,
+      game_id: id,
+      instance_id: "i-1",
+    }),
+    stop: async (id: string) => ({ ok: true, game_id: id }),
+    status: async (id: string) => ({ game_id: id, state: "running" as const }),
+    ...opts.rpc,
+  };
   const env = {
     GAME_REGISTRY: games.kv,
     ADMIN_AUTH: auth.kv,
@@ -94,6 +106,7 @@ function makeEnv(opts: {
     CLOUDFLARE_DNS_API_TOKEN: "cf-token",
     CLOUDFLARE_ZONE_ID: "zone-1",
     CLOUDFLARE_BASE_DOMAIN: "nakake.com",
+    DISCORD_HANDLER: rpc,
   } as unknown as Env;
   return { env, gamesStore: games.store };
 }
@@ -473,18 +486,148 @@ describe("POST /admin/api/games (new game)", () => {
   });
 });
 
-describe("not-yet-implemented routes", () => {
-  it("POST /admin/api/games/:id/start → 501 (E-2)", async () => {
+describe("ops endpoints (start/stop/status RPC)", () => {
+  function opsReq(
+    id: string,
+    sub: string,
+    method: "POST" | "GET",
+    sid: string,
+    xrw = true,
+  ): Request {
+    const headers: Record<string, string> = {};
+    if (xrw) headers["x-requested-with"] = "fetch";
+    return req(`/admin/api/games/${id}/${sub}`, { method, sid, headers });
+  }
+
+  it("POST start delegates to the RPC and returns the result", async () => {
+    let called: string | null = null;
     const { env } = makeEnv({
-      games: { atm10: baseGame() },
+      sessions: { s1: session("111") },
+      admins: "111",
+      rpc: {
+        start: async (id: string) => {
+          called = id;
+          return { ok: true, game_id: id, instance_id: "i-42" };
+        },
+      },
+    });
+    const res = await handleGamesApi(
+      opsReq("atm10", "start", "POST", "s1"),
+      env,
+      ctx,
+    );
+    expect(res.status).toBe(202); // accepted (RPC backgrounds the workflow)
+    expect(called).toBe("atm10");
+    const body = (await res.json()) as { result: { instance_id: string } };
+    expect(body.result.instance_id).toBe("i-42");
+  });
+
+  it("POST start requires X-Requested-With", async () => {
+    const { env } = makeEnv({
       sessions: { s1: session("111") },
       admins: "111",
     });
     const res = await handleGamesApi(
-      req("/admin/api/games/atm10/start", { method: "POST", sid: "s1" }),
+      opsReq("atm10", "start", "POST", "s1", false),
       env,
       ctx,
     );
-    expect(res.status).toBe(501);
+    expect(res.status).toBe(403);
+  });
+
+  it("maps an RPC ok:false (rejected) result to 409", async () => {
+    const { env } = makeEnv({
+      sessions: { s1: session("111") },
+      admins: "111",
+      rpc: {
+        start: async (id: string) => ({
+          ok: false,
+          game_id: id,
+          message: "disabled",
+        }),
+      },
+    });
+    const res = await handleGamesApi(
+      opsReq("atm10", "start", "POST", "s1"),
+      env,
+      ctx,
+    );
+    expect(res.status).toBe(409);
+  });
+
+  it("returns 502 when the RPC itself throws", async () => {
+    const { env } = makeEnv({
+      sessions: { s1: session("111") },
+      admins: "111",
+      rpc: {
+        stop: async () => {
+          throw new Error("binding down");
+        },
+      },
+    });
+    const res = await handleGamesApi(
+      opsReq("atm10", "stop", "POST", "s1"),
+      env,
+      ctx,
+    );
+    expect(res.status).toBe(502);
+  });
+
+  it("GET status delegates and returns the state", async () => {
+    const { env } = makeEnv({
+      sessions: { s1: session("333") },
+      players: "333",
+      rpc: {
+        status: async (id: string) => ({
+          game_id: id,
+          state: "running" as const,
+          endpoint: "atm10.nakake.com:25565",
+        }),
+      },
+    });
+    const res = await handleGamesApi(
+      opsReq("atm10", "status", "GET", "s1"),
+      env,
+      ctx,
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { result: { state: string } };
+    expect(body.result.state).toBe("running");
+  });
+
+  it("rejects status via POST with 405", async () => {
+    const { env } = makeEnv({
+      sessions: { s1: session("111") },
+      admins: "111",
+    });
+    const res = await handleGamesApi(
+      opsReq("atm10", "status", "POST", "s1"),
+      env,
+      ctx,
+    );
+    expect(res.status).toBe(405);
+  });
+
+  it("returns 404 for an unknown op", async () => {
+    const { env } = makeEnv({
+      sessions: { s1: session("111") },
+      admins: "111",
+    });
+    const res = await handleGamesApi(
+      opsReq("atm10", "frobnicate", "POST", "s1"),
+      env,
+      ctx,
+    );
+    expect(res.status).toBe(404);
+  });
+
+  it("still gates ops behind auth (401 without session)", async () => {
+    const { env } = makeEnv({ admins: "111" });
+    const res = await handleGamesApi(
+      req("/admin/api/games/atm10/start", { method: "POST" }),
+      env,
+      ctx,
+    );
+    expect(res.status).toBe(401);
   });
 });

@@ -380,3 +380,40 @@ select:focus {
   outline: none;
   border-color: var(--accent);
 }
+
+/* ---- ops (start/stop/status, E-2) ---- */
+fieldset.ops {
+  max-width: 640px;
+}
+.ops-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.8rem;
+  margin: 0.5rem 0 0.9rem;
+}
+.ops-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.9rem;
+}
+.actions button.danger {
+  background: #b3322c;
+  color: #fff;
+}
+.actions button.ghost,
+.ops-row button.ghost {
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.35rem 0.8rem;
+  font-size: 0.82rem;
+  font-weight: 500;
+  cursor: pointer;
+}
+.ops-row button.ghost:disabled {
+  opacity: 0.6;
+  cursor: default;
+}

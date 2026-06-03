@@ -4,6 +4,11 @@
 // X-Requested-With を付ける (CSRF 軽減、docs §4.3 / §9.1 #5)。
 import type { GameDefinition, Tier } from "@gs/shared/registry-types";
 import type { ModpackFile, ModpackSummary } from "@gs/shared/modpack-types";
+import type {
+  StartResult,
+  StatusResult,
+  StopResult,
+} from "@gs/shared/rpc-types";
 
 const API_BASE = "/admin/api";
 
@@ -111,4 +116,34 @@ export async function createGame(
 ): Promise<GameDefinition> {
   const body = await apiSend<{ game: GameDefinition }>("POST", "/games", form);
   return body.game;
+}
+
+// ---- ops (start/stop/status、E-2)。AWS 操作は RPC で discord-handler に委譲される ----
+
+// 起動を受け付ける (202 = 受理。完了は status polling で確認)。却下 (未登録/無効) は ApiError(409)。
+export async function startGame(id: string): Promise<StartResult> {
+  const body = await apiSend<{ result: StartResult }>(
+    "POST",
+    `/games/${encodeURIComponent(id)}/start`,
+    {},
+  );
+  return body.result;
+}
+
+// 停止を受け付ける (202 = 受理)。
+export async function stopGame(id: string): Promise<StopResult> {
+  const body = await apiSend<{ result: StopResult }>(
+    "POST",
+    `/games/${encodeURIComponent(id)}/stop`,
+    {},
+  );
+  return body.result;
+}
+
+// 現在状態を引く (RPC で EC2 を describe)。
+export async function fetchGameStatus(id: string): Promise<StatusResult> {
+  const body = await apiGet<{ result: StatusResult }>(
+    `/games/${encodeURIComponent(id)}/status`,
+  );
+  return body.result;
 }

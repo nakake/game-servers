@@ -4,8 +4,10 @@
 // `wrangler secret put` / `.dev.vars` で投入された値が fetch ハンドラの env に渡る。
 //
 // 設計上の制約 (ADR 0004): admin-webui は **AWS / OIDC 秘密鍵を持たない**。
-// AWS に触る操作 (start/stop/status/s3Sync) は DISCORD_HANDLER への Service Binding RPC
+// AWS に触る操作 (start/stop/status) は DISCORD_HANDLER への Service Binding RPC
 // に委譲する。CurseForge / Cloudflare DNS / KV は admin-webui が自前で扱う。
+
+import type { InternalRpcInterface } from "@gs/shared/rpc-types";
 
 export interface Env {
   // ---- KV bindings (discord-handler と同じ namespace を共有) ----
@@ -41,10 +43,11 @@ export interface Env {
   CLOUDFLARE_ZONE_ID: string;
   CLOUDFLARE_BASE_DOMAIN: string;
 
-  // ---- Service Binding (RPC、E-1 で有効化) ----
+  // ---- Service Binding (RPC、E-1/E-2 で有効化) ----
   // discord-handler が export する InternalRpc (WorkerEntrypoint) への binding。
-  // AWS 操作 (start/stop/status/s3Sync) を OIDC 鍵を複製せず委譲する (docs §6.1)。
-  // InternalRpc は Phase 7 E-1 で実装するため、それまで wrangler.toml の [[services]] は
-  // コメントアウトしておく (存在しない entrypoint への binding は deploy で壊れるため)。
-  // DISCORD_HANDLER: Service<import('@gs/shared/rpc-types')>;  // ← E-1 で型を確定して有効化
+  // AWS 操作 (start/stop/status) を OIDC 鍵を複製せず委譲する (docs §6.1)。E-1 で
+  // InternalRpc を実装したので E-2 で有効化。wrangler.toml の [[services]] も併せて解除する。
+  // 型は契約 interface を直接当てる: RPC stub の各メソッドは Promise<契約型> を返すので
+  // `Service<>` ラッパは不要 (Service<> は WorkerEntrypoint-branded 型しか受けない)。
+  DISCORD_HANDLER: InternalRpcInterface;
 }

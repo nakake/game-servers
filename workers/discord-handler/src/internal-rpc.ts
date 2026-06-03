@@ -9,6 +9,11 @@
 //
 // 進捗 (onProgress) は使わない: Web 側は polling で status を引く設計 (docs §6.1)。
 // 起動完了の Discord 通知 (pending-ready) も張らない — それは Discord `/start` 固有の文脈。
+//
+// start/stop は数分かかる (EC2 running 待ち最大 240s 等) ので、Discord `/start` ハンドラと
+// 同じく `this.ctx.waitUntil` で後追いし即時返す。高速な検証 (game 存在 / enabled) だけ同期で
+// 行い、呼び出し側 (admin-webui) は即フィードバックを得て、完了は status polling で確認する。
+// waitUntil タスクは request ツリー全体 (caller の応答後) まで生かされる。
 
 import { WorkerEntrypoint } from 'cloudflare:workers';
 
@@ -28,7 +33,8 @@ export class InternalRpc
   extends WorkerEntrypoint<Env>
   implements InternalRpcInterface
 {
-  // ゲームを起動する。重複起動は already-running として ok 扱い (Discord `/start` と同じ判断)。
+  // ゲームの起動を受け付ける。検証のみ同期で行い、起動本体は waitUntil で後追いする。
+  // 完了 (running + DNS) は呼び出し側が status polling で確認する。
   async start(gameId: string): Promise<StartResult> {
     const game = await getGame(this.env.GAME_REGISTRY, gameId);
     if (game === undefined) {
@@ -38,56 +44,38 @@ export class InternalRpc
       return { ok: false, game_id: gameId, message: `game disabled: ${gameId}` };
     }
 
-    const result = await runStartWorkflow(this.env, this.ctx, game);
-    switch (result.status) {
-      case 'started':
-        return {
-          ok: true,
-          game_id: gameId,
-          instance_id: result.instanceId,
-          message: `starting (${result.fqdn}:${result.port})`,
-        };
-      case 'already-running':
-        return {
-          ok: true,
-          game_id: gameId,
-          instance_id: result.instanceId,
-          message: `already ${result.state}`,
-        };
-      case 'failed':
-        return { ok: false, game_id: gameId, message: result.error };
-    }
+    this.ctx.waitUntil(
+      runStartWorkflow(this.env, this.ctx, game).then((result) => {
+        if (result.status === 'failed') {
+          console.error(`[rpc] start ${gameId} failed: ${result.error}`);
+        } else {
+          console.log(`[rpc] start ${gameId}: ${result.status}`);
+        }
+      }),
+    );
+    return { ok: true, game_id: gameId, message: 'starting' };
   }
 
-  // ゲームを停止する。既に停止済みは ok 扱い (idle 通知は web trigger では出ない)。
+  // ゲームの停止を受け付ける。検証のみ同期で行い、停止本体は waitUntil で後追いする。
+  // 既に停止済み等の判定は workflow 内 (idle 通知は web trigger では出ない)。
   async stop(gameId: string): Promise<StopResult> {
     const game = await getGame(this.env.GAME_REGISTRY, gameId);
     if (game === undefined) {
       return { ok: false, game_id: gameId, message: `unknown game: ${gameId}` };
     }
 
-    const outcome = await runStopWorkflow(this.env, this.ctx, game, {
-      triggeredBy: 'web',
-    });
-    switch (outcome.status) {
-      case 'ok':
-        return {
-          ok: true,
-          game_id: gameId,
-          message:
-            outcome.snapshotId !== undefined
-              ? `stopped (snapshot ${outcome.snapshotId})`
-              : 'stopped',
-        };
-      case 'already-stopped':
-        return {
-          ok: true,
-          game_id: gameId,
-          message: `already stopped (${outcome.reason})`,
-        };
-      case 'failed':
-        return { ok: false, game_id: gameId, message: outcome.error };
-    }
+    this.ctx.waitUntil(
+      runStopWorkflow(this.env, this.ctx, game, { triggeredBy: 'web' }).then(
+        (outcome) => {
+          if (outcome.status === 'failed') {
+            console.error(`[rpc] stop ${gameId} failed: ${outcome.error}`);
+          } else {
+            console.log(`[rpc] stop ${gameId}: ${outcome.status}`);
+          }
+        },
+      ),
+    );
+    return { ok: true, game_id: gameId, message: 'stopping' };
   }
 
   // ゲームの現在状態を返す。未登録は state=unknown。

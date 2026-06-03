@@ -1,7 +1,16 @@
 <script lang="ts">
+  import { onDestroy } from "svelte";
   import type { GameDefinition, Tier } from "@gs/shared/registry-types";
+  import type { ServerState } from "@gs/shared/rpc-types";
   import { applyGameUpdate } from "@gs/shared/build";
-  import { getGame, updateGame, ApiError } from "../lib/api";
+  import {
+    getGame,
+    updateGame,
+    startGame,
+    stopGame,
+    fetchGameStatus,
+    ApiError,
+  } from "../lib/api";
   import { DUMMY_GAMES } from "../lib/dummy";
   import { navigate } from "../lib/router";
   import { session } from "../lib/session";
@@ -40,11 +49,108 @@
     (game.env["MODPACK_PLATFORM"] === "AUTO_CURSEFORGE" ||
       (game.env["CF_SLUG"] ?? "") !== "");
 
+  // ---- ops (start/stop/status、E-2) ----
+  let opsState: ServerState | null = null; // null = 未取得
+  let opsEndpoint: string | null = null;
+  let opsLoading = false; // status fetch 中
+  let opsActing = false; // start/stop 受付 + 後続 polling 中
+  let opsErr: string | null = null;
+  let opsMsg: string | null = null;
+  // dummy / offline (vite dev 単体) では実バックエンドが無く ops 不可。
+  $: opsDisabled = gameDummy || ($session?.usingDummy ?? false);
+  // 進行中 polling を gameId 変更 / destroy / 新 action で無効化するトークン。
+  let pollToken = 0;
+
   // gameId が変わったら (一覧→別ゲーム) 再ロードする。onMount 代わりの reactive ガード。
   let loadedId: string | null = null;
   $: if (gameId !== loadedId) {
     loadedId = gameId;
+    pollToken++; // 前ゲームの polling を止める
+    opsState = null;
+    opsEndpoint = null;
+    opsErr = null;
+    opsMsg = null;
     void load();
+  }
+
+  onDestroy(() => {
+    pollToken++; // 進行中の polling ループを止める
+  });
+
+  function sleep(ms: number): Promise<void> {
+    return new Promise((r) => setTimeout(r, ms));
+  }
+
+  async function loadStatus(): Promise<void> {
+    if (opsDisabled) return;
+    opsLoading = true;
+    opsErr = null;
+    try {
+      const s = await fetchGameStatus(gameId);
+      opsState = s.state;
+      opsEndpoint = s.endpoint ?? null;
+    } catch (e) {
+      opsErr =
+        e instanceof ApiError
+          ? `状態取得に失敗 (HTTP ${e.status})`
+          : "状態取得に失敗";
+    } finally {
+      opsLoading = false;
+    }
+  }
+
+  // targets のいずれかに達するか maxPolls 回まで 5s 間隔で status を引く。token で中断可能。
+  async function pollUntil(
+    targets: ServerState[],
+    maxPolls: number,
+  ): Promise<void> {
+    const myToken = ++pollToken;
+    for (let i = 0; i < maxPolls; i++) {
+      await sleep(5000);
+      if (myToken !== pollToken) return; // 中断 (gameId 変更 / destroy / 新 action)
+      await loadStatus();
+      if (opsState !== null && targets.includes(opsState)) return;
+    }
+  }
+
+  async function doStart(): Promise<void> {
+    opsErr = null;
+    opsMsg = null;
+    opsActing = true;
+    try {
+      await startGame(gameId);
+      opsMsg = "起動を受け付けました (running まで数分かかります)";
+      opsState = "pending";
+      await pollUntil(["running"], 48); // ~4 分
+    } catch (e) {
+      opsErr =
+        e instanceof ApiError
+          ? e.status === 409
+            ? "起動できません (無効化/未登録)"
+            : `起動に失敗 (HTTP ${e.status})`
+          : "起動に失敗 (バックエンド未接続)";
+    } finally {
+      opsActing = false;
+    }
+  }
+
+  async function doStop(): Promise<void> {
+    opsErr = null;
+    opsMsg = null;
+    opsActing = true;
+    try {
+      await stopGame(gameId);
+      opsMsg = "停止を受け付けました";
+      opsState = "stopping";
+      await pollUntil(["stopped"], 36); // ~3 分
+    } catch (e) {
+      opsErr =
+        e instanceof ApiError
+          ? `停止に失敗 (HTTP ${e.status})`
+          : "停止に失敗 (バックエンド未接続)";
+    } finally {
+      opsActing = false;
+    }
   }
 
   async function load(): Promise<void> {
@@ -78,6 +184,8 @@
     } finally {
       loading = false;
       if (game !== null) initForm(game);
+      // 実ゲーム (dummy でない) のときだけ初期 status を引く。
+      if (game !== null && !gameDummy) void loadStatus();
     }
   }
 
@@ -195,6 +303,58 @@
   {/if}
 
   <h2>{game.display_name} <span class="muted">({game.game_id})</span></h2>
+
+  <!-- 操作 (start/stop/status、E-2)。状態変更は RPC で discord-handler に委譲される。 -->
+  <fieldset class="ops">
+    <legend>操作</legend>
+    {#if opsDisabled}
+      <p class="muted note">
+        ローカル/ダミー表示中のため起動・停止は使えません (実バックエンドが必要)。
+      </p>
+    {:else}
+      <div class="ops-row">
+        <span class="ops-state">
+          状態:
+          {#if opsState === null}
+            <span class="muted">{opsLoading ? "確認中…" : "—"}</span>
+          {:else}
+            <span class="pill {opsState === 'running' ? 'on' : opsState === 'stopped' ? 'off' : ''}"
+              >{opsState}</span
+            >
+          {/if}
+          {#if opsEndpoint}
+            <code>{opsEndpoint}</code>
+          {/if}
+        </span>
+        <button
+          type="button"
+          class="ghost"
+          on:click={loadStatus}
+          disabled={opsLoading || opsActing}>状態更新</button
+        >
+      </div>
+      <div class="actions">
+        <button
+          type="button"
+          on:click={doStart}
+          disabled={opsActing ||
+            opsState === "running" ||
+            opsState === "pending"}>起動</button
+        >
+        <button
+          type="button"
+          class="danger"
+          on:click={doStop}
+          disabled={opsActing ||
+            opsState === "stopped" ||
+            opsState === null}>停止</button
+        >
+        {#if opsActing}<span class="muted">処理中…</span>{/if}
+        {#if opsMsg}<span class="ok-msg">{opsMsg}</span>{/if}
+        {#if opsErr}<span class="err-msg">{opsErr}</span>{/if}
+      </div>
+    {/if}
+  </fieldset>
 
   <form on:submit|preventDefault={save}>
     <fieldset>

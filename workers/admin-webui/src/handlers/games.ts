@@ -49,9 +49,10 @@ export async function handleGamesApi(
   const gameId = decodeURIComponent(segments[0]!);
   const sub = segments[1];
 
-  // /admin/api/games/:id/<sub> (start/stop/status) は E-2。
+  // /admin/api/games/:id/<sub> (start/stop/status) — AWS 操作は RPC 委譲 (E-2)。
   if (sub !== undefined) {
-    return jsonError(501, "not implemented (Phase 7 E-2)");
+    if (segments.length !== 2) return jsonError(404, "unknown route");
+    return opsHandler(request, env, gameId, sub);
   }
 
   // /admin/api/games/:id
@@ -157,6 +158,52 @@ async function postHandler(
   const game = buildGameDefinition(form, tier, recordId);
   await putGame(env.GAME_REGISTRY, game);
   return json(201, { game });
+}
+
+// start/stop/status (E-2)。AWS 操作は admin-webui に鍵が無いので、discord-handler の
+// InternalRpc (WorkerEntrypoint) に Service Binding RPC で委譲する (ADR 0004 / docs §6.1)。
+// start/stop は状態変更なので X-Requested-With 必須、status は GET。
+async function opsHandler(
+  request: Request,
+  env: Env,
+  gameId: string,
+  sub: string,
+): Promise<Response> {
+  const requireXrw = (): Response | null =>
+    request.headers.get("x-requested-with") === null
+      ? jsonError(403, "missing X-Requested-With")
+      : null;
+
+  try {
+    if (sub === "start") {
+      if (request.method !== "POST")
+        return jsonError(405, "method not allowed");
+      const bad = requireXrw();
+      if (bad !== null) return bad;
+      // start は受付のみ (RPC が waitUntil で後追い)。ok:true=受理 → 202、ok:false=
+      // 検証却下 (未登録/無効) → 409。完了は SPA が status polling で確認する。
+      const result = await env.DISCORD_HANDLER.start(gameId);
+      return json(result.ok ? 202 : 409, { result });
+    }
+    if (sub === "stop") {
+      if (request.method !== "POST")
+        return jsonError(405, "method not allowed");
+      const bad = requireXrw();
+      if (bad !== null) return bad;
+      const result = await env.DISCORD_HANDLER.stop(gameId);
+      return json(result.ok ? 202 : 409, { result });
+    }
+    if (sub === "status") {
+      if (request.method !== "GET") return jsonError(405, "method not allowed");
+      const result = await env.DISCORD_HANDLER.status(gameId);
+      return json(200, { result });
+    }
+    return jsonError(404, `unknown op: ${sub}`);
+  } catch (err) {
+    // RPC 自体の失敗 (binding 不在 / discord-handler 例外)。AWS の内部詳細は漏らさない。
+    console.error(`ops RPC ${sub} failed:`, err);
+    return jsonError(502, `ops failed: ${sub}`);
+  }
 }
 
 function json(status: number, body: unknown): Response {
