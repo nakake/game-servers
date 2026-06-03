@@ -44,7 +44,9 @@ const STOP_LOCK_TTL_SECONDS = 600;
 const DATA_DEVICE = '/dev/sdf';
 const DOCKER_STOP_GRACE_SECONDS = 60;
 
-export type StopTrigger = 'discord' | 'sidecar' | 'cron-fallback';
+// 'web' = admin-webui からの Service Binding RPC (Phase 7 E-1)。Discord 同様、idle 通知は
+// 出さない (操作者が WebUI で結果を見るため)。idle 通知を出すのは sidecar / cron-fallback のみ。
+export type StopTrigger = 'discord' | 'sidecar' | 'cron-fallback' | 'web';
 
 export interface RunStopWorkflowOptions {
   triggeredBy: StopTrigger;
@@ -93,10 +95,10 @@ export async function runStopWorkflow(
 ): Promise<StopWorkflowOutcome> {
   const outcome = await executeStopWorkflow(env, ctx, game, opts);
 
-  // Phase 4 Step 2: Discord 経由以外の発火 (sidecar / cron-fallback) は Discord channel に
-  // webhook 通知を出す。Discord 経由は元 interaction の follow-up edit が既に出るので不要。
+  // Phase 4 Step 2: 自動停止経路 (sidecar / cron-fallback) のみ Discord channel に webhook
+  // 通知を出す。Discord `/stop` と admin-webui RPC ('web') は操作者が結果を直接見るので不要。
   // 通知失敗は本フローを止めない (postDiscordWebhookMessage 自体も throw しない契約)。
-  if (opts.triggeredBy !== 'discord') {
+  if (opts.triggeredBy === 'sidecar' || opts.triggeredBy === 'cron-fallback') {
     const embed = buildIdleStopNotification(game, outcome, opts.triggeredBy);
     if (embed !== undefined) {
       try {

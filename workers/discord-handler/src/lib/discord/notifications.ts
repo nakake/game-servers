@@ -27,6 +27,7 @@ const TRIGGER_LABEL: Record<StopTrigger, string> = {
   discord: 'Discord /stop',
   sidecar: 'sidecar (idle 検知)',
   'cron-fallback': 'Cron フォールバック (sidecar 沈黙)',
+  web: 'admin-webui',
 };
 
 // idle 停止 (sidecar / cron-fallback 発火) の通知 embed を組み立てる。
@@ -40,9 +41,9 @@ export function buildIdleStopNotification(
   outcome: StopWorkflowOutcome,
   triggeredBy: StopTrigger,
 ): Record<string, unknown> | undefined {
-  // Discord 経由の停止は元の /stop interaction が既に follow-up edit を出しているので
-  // 二重通知を避けるためスキップ (呼び出し側でも triggeredBy ガードはしているが念のため二重に)。
-  if (triggeredBy === 'discord') {
+  // Discord / web 経由の停止は操作者が結果を直接見る (follow-up edit / WebUI) ので、二重通知を
+  // 避けるためスキップ (呼び出し側でも triggeredBy ガードはしているが念のため二重に)。
+  if (triggeredBy === 'discord' || triggeredBy === 'web') {
     return undefined;
   }
 

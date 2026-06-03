@@ -17,6 +17,11 @@ import type { Env } from './env.js';
 
 export type { Env };
 
+// admin-webui が Service Binding 経由で呼ぶ AWS 操作 RPC (Phase 7 E-1、ADR 0004 / docs §6.1)。
+// WorkerEntrypoint は default export と並べて named export する (admin-webui の
+// [[services]] entrypoint = "InternalRpc" がこれを参照する)。
+export { InternalRpc } from './internal-rpc.js';
+
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);

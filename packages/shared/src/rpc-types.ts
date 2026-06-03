@@ -1,8 +1,9 @@
-// discord-handler が export する InternalRpc (WorkerEntrypoint) の引数・戻り値型。
+// discord-handler が export する InternalRpc (WorkerEntrypoint) の引数・戻り値型 + メソッド契約。
 // admin-webui は Service Binding 経由でこれらを呼ぶ (ADR 0004 / docs §6.1)。
 //
 // AWS ロジックそのものは discord-handler 内に閉じ、ここには契約 (型) だけを置く。
-// B-0a では骨組み。実 RPC メソッド実装との整合・詳細化は Phase 7 E-1 で行う。
+// E-1 で実 RPC (start/stop/status) と整合済み。s3Sync は不採用 — Worker にローカル config が
+// 無く実 sync 不可で、AUTO_CURSEFORGE は boot 時に CF 取得するため新規追加でも S3 sync 不要。
 
 // EC2 / インスタンスのライフサイクル状態 (status RPC の戻り)。
 export type ServerState =
@@ -32,4 +33,13 @@ export interface StatusResult {
   // 起動済みの場合の接続先 (例: atm10.example.com)。
   endpoint?: string;
   message?: string;
+}
+
+// InternalRpc (discord-handler の WorkerEntrypoint) のメソッド契約。
+// - discord-handler の InternalRpc class はこれを implements して契約を compile time に固定する。
+// - admin-webui は Service Binding を `Service<InternalRpcInterface>` で型付けする (E-2)。
+export interface InternalRpcInterface {
+  start(gameId: string): Promise<StartResult>;
+  stop(gameId: string): Promise<StopResult>;
+  status(gameId: string): Promise<StatusResult>;
 }
