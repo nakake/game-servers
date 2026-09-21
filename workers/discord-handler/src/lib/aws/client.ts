@@ -3,7 +3,10 @@
 // aws4fetch で SigV4 署名し、JSON protocol (SSM/Lambda/etc) の呼び出しを共通化する。
 // EC2/EBS の Query protocol (XML) は別レイヤー (ec2.ts) で扱う。
 //
-// リトライ: exponential backoff + jitter。Workers の CPU 時間制約を考えて max 3 回。
+// リトライ: exponential backoff + jitter。再試行はこの層にまとめ、aws4fetch の内蔵
+//   リトライは retries: 0 で止める。5xx / 429 / Throttling は全 action で maxRetries 回まで
+//   (backoff は 200 / 400 / 800 / 1600 / 3000ms + jitter、合計約 6 秒)、
+//   abort / ネットワークエラーは再送が安全な action だけ 1 回まで再試行する。
 //   失敗時に上位で Discord に通知できるよう AwsApiError で raise する。
 
 import { AwsClient } from 'aws4fetch';
@@ -19,7 +22,7 @@ export interface AwsCredentials {
 export interface AwsApiClientOptions {
   region: string;
   credentials: AwsCredentials;
-  // リトライ回数 (デフォルト 3)。0 でリトライ無効。
+  // リトライ回数 (デフォルト 5)。0 でリトライ無効。
   maxRetries?: number;
 }
 
@@ -47,6 +50,62 @@ export interface QueryRequestOptions {
   timeoutMs?: number;
 }
 
+// ----------------------------------------------------------------------
+// 再試行 / タイムアウトの方針
+// ----------------------------------------------------------------------
+
+// 1 試行あたりの既定タイムアウト (ms)。
+const DEFAULT_ATTEMPT_TIMEOUT_MS = 15_000;
+// 読み取り系は短く切って、経路不調時に再試行する余地を残す。
+const READ_ONLY_ATTEMPT_TIMEOUT_MS = 8_000;
+
+// AwsApiError 以外 (abort / ネットワークエラー) の再試行は 1 呼び出しにつき 1 回まで。
+const NETWORK_RETRY_LIMIT = 1;
+
+// 読み取り専用 action は prefix で判定する (DescribeInstances / DescribeSnapshots ...)。
+const READ_ONLY_OPERATION_PREFIXES = ['Describe'] as const;
+// prefix で拾えない読み取り専用 action。
+const READ_ONLY_OPERATIONS = new Set(['GetCommandInvocation']);
+
+// 読み取り系以外で abort / ネットワークエラーを再試行してよい action。
+//   5xx / 429 は action を問わず再試行される (従来からの挙動)。ここで制御するのは
+//   「届いたか不明」な abort / ネットワークエラーの再送可否だけ。
+//   TerminateInstances: 冪等なので再送してよい。
+//   RunInstances: 再送で二重起動し得るので、ClientToken があるときだけ許可する
+//     (ec2.ts を経由しない呼び出しでも、token なしでは再送されない)。
+//   CreateSnapshot / DeleteVolume / DeleteSnapshot / SendCommand は入れない
+//   (再送すると重複や NotFound になり得る)。
+const NETWORK_RETRY_OPERATIONS = new Set(['TerminateInstances']);
+// ClientToken による重複排除が効く action。params に token が無ければ再送しない。
+const CLIENT_TOKEN_OPERATIONS = new Set(['RunInstances']);
+
+function isReadOnlyOperation(operation: string): boolean {
+  return (
+    READ_ONLY_OPERATION_PREFIXES.some((prefix) => operation.startsWith(prefix)) ||
+    READ_ONLY_OPERATIONS.has(operation)
+  );
+}
+
+// params / payload に空でない ClientToken が含まれているか。
+function containsClientToken(params: Record<string, unknown>): boolean {
+  const token = params['ClientToken'];
+  return typeof token === 'string' && token !== '';
+}
+
+// abort / ネットワークエラーを再試行してよい action か。
+// RunInstances は ClientToken が含まれているときだけ許可する (二重起動防止)。
+function allowsNetworkRetry(operation: string, hasClientToken: boolean): boolean {
+  if (isReadOnlyOperation(operation)) return true;
+  if (CLIENT_TOKEN_OPERATIONS.has(operation)) return hasClientToken;
+  return NETWORK_RETRY_OPERATIONS.has(operation);
+}
+
+// 1 試行のタイムアウト。読み取り系だけ 8 秒に抑える (呼び出し側の指定が短ければそちらを優先)。
+function attemptTimeoutMs(operation: string, timeoutMs: number | undefined): number {
+  const base = timeoutMs ?? DEFAULT_ATTEMPT_TIMEOUT_MS;
+  return isReadOnlyOperation(operation) ? Math.min(base, READ_ONLY_ATTEMPT_TIMEOUT_MS) : base;
+}
+
 export class AwsApiClient {
   private readonly aws: AwsClient;
   private readonly maxRetries: number;
@@ -54,7 +113,7 @@ export class AwsApiClient {
 
   constructor(options: AwsApiClientOptions) {
     this.region = options.region;
-    this.maxRetries = options.maxRetries ?? 3;
+    this.maxRetries = options.maxRetries ?? 5;
     this.aws = new AwsClient({
       accessKeyId: options.credentials.accessKeyId,
       secretAccessKey: options.credentials.secretAccessKey,
@@ -62,6 +121,8 @@ export class AwsApiClient {
         ? { sessionToken: options.credentials.sessionToken }
         : {}),
       region: options.region,
+      // 内蔵リトライを止め、再試行は withRetry に一本化する (二重リトライ防止)。
+      retries: 0,
     });
   }
 
@@ -70,10 +131,11 @@ export class AwsApiClient {
     const url = `https://${opts.service}.${this.region}.amazonaws.com/`;
     const body = JSON.stringify(opts.payload);
     const operation = opts.target.split('.').pop() ?? opts.target;
+    const timeoutMs = attemptTimeoutMs(operation, opts.timeoutMs);
 
-    return this.withRetry(operation, async () => {
+    return this.withRetry(operation, containsClientToken(opts.payload), async () => {
       const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), opts.timeoutMs ?? 15_000);
+      const timeout = setTimeout(() => controller.abort(), timeoutMs);
       try {
         const response = await this.aws.fetch(url, {
           method: 'POST',
@@ -111,10 +173,11 @@ export class AwsApiClient {
       Version: opts.version,
       ...opts.params,
     }).toString();
+    const timeoutMs = attemptTimeoutMs(opts.action, opts.timeoutMs);
 
-    return this.withRetry(opts.action, async () => {
+    return this.withRetry(opts.action, containsClientToken(opts.params), async () => {
       const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), opts.timeoutMs ?? 15_000);
+      const timeout = setTimeout(() => controller.abort(), timeoutMs);
       try {
         const response = await this.aws.fetch(url, {
           method: 'POST',
@@ -143,16 +206,36 @@ export class AwsApiClient {
   }
 
   // リトライ可能なエラーは exponential backoff。それ以外は即 throw。
-  private async withRetry<T>(operation: string, fn: () => Promise<T>): Promise<T> {
+  // AwsApiError 以外 (abort / ネットワークエラー) は許可リストの action だけ 1 回再試行する。
+  // 総試行回数はどちらの経路でも maxRetries + 1 を超えない。
+  private async withRetry<T>(
+    operation: string,
+    hasClientToken: boolean,
+    fn: () => Promise<T>,
+  ): Promise<T> {
+    const networkRetryAllowed = allowsNetworkRetry(operation, hasClientToken);
+    let networkRetries = 0;
     let lastError: unknown;
     for (let attempt = 0; attempt <= this.maxRetries; attempt++) {
       try {
         return await fn();
       } catch (err) {
         lastError = err;
-        const retryable = err instanceof AwsApiError && err.isRetryable;
-        if (!retryable || attempt === this.maxRetries) break;
-        const backoffMs = Math.min(2 ** attempt * 100, 2000) + Math.random() * 100;
+        if (err instanceof AwsApiError) {
+          if (!err.isRetryable || attempt === this.maxRetries) break;
+        } else {
+          if (
+            !networkRetryAllowed ||
+            networkRetries >= NETWORK_RETRY_LIMIT ||
+            attempt === this.maxRetries
+          ) {
+            break;
+          }
+          networkRetries++;
+        }
+        // 200 / 400 / 800 / 1600 / 3000ms + jitter。aws4fetch の内蔵リトライを止めた分、
+        // 5xx に粘れる時間を合計約 6 秒確保する (Terminate 失敗 = 次 Cron まで課金のため)。
+        const backoffMs = Math.min(2 ** attempt * 200, 3000) + Math.random() * 100;
         await new Promise((resolve) => setTimeout(resolve, backoffMs));
       }
     }
