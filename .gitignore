@@ -20,6 +20,9 @@
 # Cloudflare Workers ローカル
 .wrangler/
 wrangler.toml.local
+# worktree からのデプロイ用に、実値入り wrangler.toml をコピーして置く一時ファイル
+# (wrangler は拡張子で形式を判定するため、`.toml` で終わる名前でないと読めない)。
+wrangler.deploy.toml
 
 # Phase 1 検証用の throwaway 秘密鍵 (Discord 署名検証テスト)
 .discord-test-keypair.json
