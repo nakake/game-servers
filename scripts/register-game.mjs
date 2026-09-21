@@ -301,9 +301,10 @@ function rebuildRegistryIndex() {
   let tmpDir;
   try {
     // kv key list の stdout は JSON 配列 ([{"name":"atm10"},...])。wrangler が前後に警告を
-    // 混ぜても壊れないよう、最初の '[' から最後の ']' までを切り出す。
+    // 混ぜても壊れないよう、行頭の '[' から最後の ']' までを切り出す (行頭に限るのは
+    // `▲ [WARNING] ...` のような角括弧入りの警告行を JSON の開始と取り違えないため)。
     const stdout = capture(listArgv, wranglerDir);
-    const start = stdout.indexOf('[');
+    const start = stdout.search(/^\[/m);
     const end = stdout.lastIndexOf(']');
     if (start === -1 || end < start) {
       throw new Error(`unexpected output from kv key list: ${stdout.slice(0, 200)}`);
