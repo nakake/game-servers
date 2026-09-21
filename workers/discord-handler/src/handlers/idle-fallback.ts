@@ -68,7 +68,7 @@ export async function handleIdleFallback(
   ctx: ExecutionContext,
 ): Promise<IdleFallbackOutcome[]> {
   const now = Date.now();
-  const games = await listGames(env.GAME_REGISTRY);
+  const games = await listGames(env);
   const outcomes: IdleFallbackOutcome[] = [];
 
   for (const game of games) {

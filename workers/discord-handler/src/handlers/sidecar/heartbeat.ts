@@ -2,11 +2,12 @@
 //
 // Worker は重い処理をせず、KV `last-seen:<game_id>` を更新するだけ。TTL は registry の
 // `idle_check.timeout_min * 3` 分に設定する (Cron フォールバックの判定窓に余裕を持たせるため)。
+// あわせて registry-index に自分の game_id を載せておく (idle-fallback の自己修復)。
 // レスポンスは 204 (No Content)。
 
 import { verifySidecarPostRequest } from './auth.js';
 import { storeLastSeen } from '../../lib/state/last-seen.js';
-import { getGame } from '../../lib/registry/store.js';
+import { ensureGameIndexed, getGame } from '../../lib/registry/store.js';
 import type { Env } from '../../env.js';
 
 interface HeartbeatBody {
@@ -62,6 +63,8 @@ export async function handleSidecarHeartbeat(
     },
     ttlSec,
   );
+
+  await ensureGameIndexed(env, auth.gameId);
 
   return new Response(null, { status: 204 });
 }

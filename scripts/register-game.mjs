@@ -5,6 +5,9 @@
 //                       既存ならスキップ。取得した record_id を registry.json に書き戻す。
 //   ② S3 config sync  : games/<game_id>/config/ を registry の config_s3_prefix に sync。
 //   ③ Workers KV 投入 : registry.json を GAME_REGISTRY namespace に key=<game_id> で put。
+//                       直後に SERVER_STATE の registry-index (キー一覧キャッシュ) も作り直す。
+//                       Worker の listGames は KV list ではなく index を読むため、追加した
+//                       ゲームをすぐ /list と Cron に見せる (失敗時は警告のみで続行)。
 //
 // design.md §3.2 のゲーム追加フロー (register-game) の実体。詳細は docs/phase2-plan.md Step 1。
 //
@@ -20,14 +23,22 @@
 //
 // --dry-run: 実リソースを一切変更せず、実行する内容だけ表示する。
 
-import { readFileSync, writeFileSync, existsSync, readdirSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, readdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
+import { tmpdir } from 'node:os';
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const wranglerDir = join(repoRoot, 'workers', 'discord-handler');
 const CF_API = 'https://api.cloudflare.com/client/v4';
+
+// SERVER_STATE の registry-index (GAME_REGISTRY のキー一覧キャッシュ) のキー名と TTL。
+// 出典は workers/discord-handler/src/lib/registry/registry-index.ts。.mjs から TS を import
+// できないため複製。
+// 変えるときは両方直す。
+const REGISTRY_INDEX_KEY = 'registry-index';
+const REGISTRY_INDEX_TTL_SECONDS = 3600;
 
 // ---- 引数 ----
 const args = process.argv.slice(2);
@@ -133,6 +144,9 @@ if (!hasKvBinding) {
     ],
     wranglerDir,
   );
+
+  // 追加したゲームをすぐ /list と Cron に見せるため、registry-index も作り直す。
+  rebuildRegistryIndex();
 }
 
 console.log(`\n✅ ${dryRun ? '[dry-run] ' : ''}register-game ${gameId} done.`);
@@ -235,6 +249,86 @@ function run(argv, cwd) {
     // 子プロセスの stderr は stdio:'inherit' で既に表示済み。Node のスタックトレースは
     // 抑止し、どのコマンドが何で落ちたかだけを 1 行で示す。
     fail(`command failed (exit ${err.status ?? '?'}): ${printable}`);
+  }
+}
+
+// 外部コマンドを実行して stdout を返す (run() と違い fail() せず throw する)。
+// stderr は inherit でそのまま表示する。
+function capture(argv, cwd) {
+  const printable = argv.join(' ');
+  log(`$ ${printable}`);
+  return execFileSync(argv[0], argv.slice(1), {
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'inherit'],
+    cwd,
+    shell: true,
+  });
+}
+
+// run() と同じ表示・実行だが、失敗しても fail() せず throw する (呼び出し側で握る)。
+function runOrThrow(argv, cwd) {
+  const printable = argv.join(' ');
+  log(`$ ${printable}`);
+  execFileSync(argv[0], argv.slice(1), { stdio: 'inherit', cwd, shell: true });
+}
+
+// SERVER_STATE の registry-index (GAME_REGISTRY のキー一覧キャッシュ) を作り直す。
+//
+// Worker の listGames は KV list ではなく index を読むため、追加したゲームをすぐ /list と
+// Cron に見せるにはここでの更新が要る。失敗してもゲームの登録自体は ③ で完了しているので
+// fail() にはせず警告のみで続行する (index は TTL 1 時間で失効し、次の listGames が list から
+// 作り直す)。
+function rebuildRegistryIndex() {
+  const listArgv = [
+    'pnpm', 'exec', 'wrangler', 'kv', 'key', 'list',
+    '--binding', 'GAME_REGISTRY',
+  ];
+  const putArgv = (path) => [
+    'pnpm', 'exec', 'wrangler', 'kv', 'key', 'put',
+    '--binding', 'SERVER_STATE',
+    REGISTRY_INDEX_KEY,
+    '--path', path,
+    '--ttl', String(REGISTRY_INDEX_TTL_SECONDS),
+  ];
+  if (dryRun) {
+    log(
+      `[dry-run] would rebuild registry-index: ${listArgv.join(' ')}  →  ` +
+        `${putArgv('<tmpfile>').join(' ')}  (cwd: ${rel(wranglerDir)})`,
+    );
+    return;
+  }
+
+  let tmpDir;
+  try {
+    // kv key list の stdout は JSON 配列 ([{"name":"atm10"},...])。wrangler が前後に警告を
+    // 混ぜても壊れないよう、最初の '[' から最後の ']' までを切り出す。
+    const stdout = capture(listArgv, wranglerDir);
+    const start = stdout.indexOf('[');
+    const end = stdout.lastIndexOf(']');
+    if (start === -1 || end < start) {
+      throw new Error(`unexpected output from kv key list: ${stdout.slice(0, 200)}`);
+    }
+    const keys = JSON.parse(stdout.slice(start, end + 1));
+
+    // put 直後の list は結果整合で新キーを含まないことがあるため、gameId を必ず足す。
+    const ids = [...new Set([...keys.map((k) => k.name), gameId])].sort();
+    log(`registry-index: [${ids.join(', ')}]`);
+
+    // JSON を argv に直接渡すと shell: true のクォートで壊れるため、一時ファイルに書いて
+    // --path で渡す。一時ディレクトリは成否にかかわらず finally で消す。
+    tmpDir = mkdtempSync(join(tmpdir(), 'gs-registry-index-'));
+    const tmpPath = join(tmpDir, 'registry-index.json');
+    writeFileSync(tmpPath, JSON.stringify(ids));
+    runOrThrow(putArgv(tmpPath), wranglerDir);
+  } catch (err) {
+    log(`⚠ registry-index rebuild failed (the game itself is registered): ${err.message}`);
+    log('  the index is rebuilt automatically within 1 hour (TTL).');
+    log(
+      `  to apply immediately: pnpm exec wrangler kv key delete --binding SERVER_STATE ` +
+        `${REGISTRY_INDEX_KEY}  (cwd: ${rel(wranglerDir)})`,
+    );
+  } finally {
+    if (tmpDir !== undefined) rmSync(tmpDir, { recursive: true, force: true });
   }
 }
 
