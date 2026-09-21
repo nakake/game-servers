@@ -58,7 +58,7 @@ export async function handleSnapshotRetention(env: Env, ctx: ExecutionContext): 
     credentials,
   });
 
-  const games = await listGames(env.GAME_REGISTRY);
+  const games = await listGames(env);
   for (const game of games) {
     const generations = game.snapshot.generations;
     if (!Number.isInteger(generations) || generations < 1) {

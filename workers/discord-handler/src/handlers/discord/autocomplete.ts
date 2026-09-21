@@ -22,7 +22,7 @@ export async function handleAutocomplete(
   const focused = interaction.data?.options?.find((o) => o.focused === true);
   const partial = typeof focused?.value === 'string' ? focused.value.toLowerCase() : '';
 
-  const games = await listGames(env.GAME_REGISTRY);
+  const games = await listGames(env);
   const choices = games
     .filter((g) => g.enabled)
     .filter(

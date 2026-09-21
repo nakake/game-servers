@@ -68,6 +68,8 @@ games/atm11/
 
 `registry.json` を変更したら `node scripts/register-game.mjs <game_id>` で Cloudflare DNS / S3 config / Workers KV に一括反映する。`--dry-run` で副作用なしのプレビュー可。
 
+Worker はゲーム一覧を SERVER_STATE の `registry-index` (TTL 1 時間のキャッシュ) から引く。register-game.mjs を通さず KV を直接書き換えてゲームを足したときは `wrangler kv key delete --binding SERVER_STATE registry-index` で index を消すと、次の参照で作り直される。
+
 Worker 側のコード(`workers/discord-handler/`) は **ゲーム名をハードコードしてはいけない**。すべて `registry.json` のスキーマに従って動くこと。
 
 ### Worker のコード

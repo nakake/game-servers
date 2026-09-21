@@ -196,6 +196,7 @@ namespace: GAME_REGISTRY
   key: <game_id>  value: GameDefinition (JSON)
 
 namespace: SERVER_STATE
+  key: registry-index  value: game_id の JSON 配列 (GAME_REGISTRY のキー一覧キャッシュ、TTL 1h。KV list 消費の削減用)
   key: current     value: { game_id, instance_id, public_ip, started_at, last_player_seen }
   key: history     value: 直近 50 件の起動・停止ログ
 ```

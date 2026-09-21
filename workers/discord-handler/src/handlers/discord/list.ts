@@ -8,7 +8,7 @@ import { InteractionResponseType } from '../../lib/discord/types.js';
 import type { Env } from '../../env.js';
 
 export async function handleListCommand(env: Env): Promise<Response> {
-  const games = await listGames(env.GAME_REGISTRY);
+  const games = await listGames(env);
   const enabled = games.filter((g) => g.enabled);
   if (enabled.length === 0) {
     return Response.json({

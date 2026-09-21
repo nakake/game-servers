@@ -33,3 +33,8 @@ export {
   parseAllowlist,
   deriveTier,
 } from "./auth-types.js";
+export {
+  REGISTRY_INDEX_KEY,
+  REGISTRY_INDEX_TTL_SECONDS,
+  parseRegistryIndex,
+} from "./registry-index.js";

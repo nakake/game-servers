@@ -82,6 +82,7 @@ export interface Env {
   // /start 〜 ready 通知の間、interaction の文脈 (token / userId) を一時保存する。
   // Phase 3 から sidecar heartbeat の last_seen / runStopWorkflow の stop-in-progress
   // ロックも同じ namespace に同居するため **必須** binding に格上げ (docs/phase3-plan.md 決定11)。
+  // registry-index (GAME_REGISTRY の game_id 一覧キャッシュ、lib/registry/store.ts) も置く。
   // 実体作成: `wrangler kv namespace create SERVER_STATE` → wrangler.toml に id を記載。
   SERVER_STATE: KVNamespace;
   // GAME_REGISTRY: ゲーム定義 (registry.json) の source of truth。
