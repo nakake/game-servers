@@ -74,14 +74,16 @@ async function executeStart(
 
   const gameId = game.game_id;
 
-  const credentials = await getAwsCredentials(env, ctx);
-  const ec2 = new AwsApiClient({
-    region: env.AWS_REGION ?? 'ap-northeast-1',
-    credentials,
-  });
   const cf = new CloudflareDnsClient({ apiToken: env.CLOUDFLARE_DNS_API_TOKEN });
 
   try {
+    // 認証取得も try の中に入れ、失敗時に deferred メッセージがエラー文言へ更新されるようにする。
+    const credentials = await getAwsCredentials(env, ctx);
+    const ec2 = new AwsApiClient({
+      region: env.AWS_REGION ?? 'ap-northeast-1',
+      credentials,
+    });
+
     // 1. 重複起動チェック (Game タグで running/pending を検索)
     const existing = await describeInstancesByTag(ec2, { Game: gameId });
     if (existing.length > 0 && existing[0] !== undefined) {

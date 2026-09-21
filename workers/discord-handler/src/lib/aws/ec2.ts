@@ -98,6 +98,9 @@ function buildRunInstancesParams(input: RunInstancesInput): Record<string, strin
     MinCount: '1',
     MaxCount: '1',
     InstanceType: input.instanceType,
+    // 再送時の重複起動を防ぐ。body は client.ts のリトライの外で 1 回だけ組み立てられるので、
+    // 同じ呼び出しの再試行では同じ値が送られる。
+    ClientToken: crypto.randomUUID(),
   };
   if (input.launchTemplate !== undefined) {
     params['LaunchTemplate.LaunchTemplateId'] = input.launchTemplate.launchTemplateId;

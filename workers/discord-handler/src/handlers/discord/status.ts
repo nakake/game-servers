@@ -39,13 +39,14 @@ async function executeStatus(
     interactionToken: interaction.token,
   });
 
-  const credentials = await getAwsCredentials(env, ctx);
-  const ec2 = new AwsApiClient({
-    region: env.AWS_REGION ?? 'ap-northeast-1',
-    credentials,
-  });
-
   try {
+    // 認証取得も try の中に入れ、失敗時に deferred メッセージがエラー文言へ更新されるようにする。
+    const credentials = await getAwsCredentials(env, ctx);
+    const ec2 = new AwsApiClient({
+      region: env.AWS_REGION ?? 'ap-northeast-1',
+      credentials,
+    });
+
     const running = await describeInstancesByTag(
       ec2,
       { Project: 'game-servers' },
