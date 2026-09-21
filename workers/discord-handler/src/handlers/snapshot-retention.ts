@@ -26,6 +26,8 @@ import {
   GAME_WORLD_SNAPSHOT_TAG_KEY,
   GAME_WORLD_SNAPSHOT_TAG_VALUE,
   getAwsCredentials,
+  OidcCredentialError,
+  type AwsCredentials,
 } from '../lib/aws/index.js';
 import { buildCronFailureNotification } from '../lib/discord/notifications.js';
 import { postDiscordWebhookMessage } from '../lib/discord/webhook.js';
@@ -37,7 +39,20 @@ import type { Env } from '../env.js';
 const FAILURE_NOTIFY_TTL_SECONDS = 3600;
 
 export async function handleSnapshotRetention(env: Env, ctx: ExecutionContext): Promise<void> {
-  const credentials = await getAwsCredentials(env, ctx);
+  let credentials: AwsCredentials;
+  try {
+    credentials = await getAwsCredentials(env, ctx);
+  } catch (err) {
+    // 一過性の経路不調 (525 / Timeout 等) は credentials.ts が Discord 通知済み。重ねて通知せず
+    // この tick を捨て、次 tick (5 分後) に再試行する。
+    if (err instanceof OidcCredentialError && err.isTransient) {
+      console.error(`snapshot retention: transient credential error — skip tick: ${err.code}`);
+      return;
+    }
+    // 設定誤りなど再試行で回復しない失敗は、Cron の outcome=exception として見えるようにする。
+    throw err;
+  }
+
   const ec2 = new AwsApiClient({
     region: env.AWS_REGION ?? 'ap-northeast-1',
     credentials,

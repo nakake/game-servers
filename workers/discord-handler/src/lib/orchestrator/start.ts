@@ -58,14 +58,17 @@ export async function runStartWorkflow(
   const gameId = game.game_id;
   const progress = wrapProgress(opts.onProgress);
 
-  const credentials = await getAwsCredentials(env, ctx);
-  const ec2 = new AwsApiClient({
-    region: env.AWS_REGION ?? 'ap-northeast-1',
-    credentials,
-  });
   const cf = new CloudflareDnsClient({ apiToken: env.CLOUDFLARE_DNS_API_TOKEN });
 
   try {
+    // 認証取得も try の中に入れ、失敗時は throw ではなく status: 'failed' を返す
+    // (Discord は follow-up をエラー文言に更新でき、RPC の waitUntil も reject しない)。
+    const credentials = await getAwsCredentials(env, ctx);
+    const ec2 = new AwsApiClient({
+      region: env.AWS_REGION ?? 'ap-northeast-1',
+      credentials,
+    });
+
     // 1. 重複起動チェック (Game タグで running/pending を検索)
     const existing = await describeInstancesByTag(ec2, { Game: gameId });
     if (existing.length > 0 && existing[0] !== undefined) {

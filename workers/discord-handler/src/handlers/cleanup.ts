@@ -16,6 +16,8 @@ import {
   describeSnapshotById,
   describeVolumeById,
   getAwsCredentials,
+  OidcCredentialError,
+  type AwsCredentials,
 } from '../lib/aws/index.js';
 import { buildCronFailureNotification } from '../lib/discord/notifications.js';
 import { postDiscordWebhookMessage } from '../lib/discord/webhook.js';
@@ -31,7 +33,20 @@ export async function handleVolumeCleanup(env: Env, ctx: ExecutionContext): Prom
   const pending = await listPendingCleanups(kv);
   if (pending.length === 0) return;
 
-  const credentials = await getAwsCredentials(env, ctx);
+  let credentials: AwsCredentials;
+  try {
+    credentials = await getAwsCredentials(env, ctx);
+  } catch (err) {
+    // 一過性の経路不調 (525 / Timeout 等) は credentials.ts が Discord 通知済み。重ねて通知せず
+    // この tick を捨て、次 tick (5 分後) に再試行する (pending entry は KV に残る)。
+    if (err instanceof OidcCredentialError && err.isTransient) {
+      console.error(`volume cleanup: transient credential error — skip tick: ${err.code}`);
+      return;
+    }
+    // 設定誤りなど再試行で回復しない失敗は、Cron の outcome=exception として見えるようにする。
+    throw err;
+  }
+
   const ec2 = new AwsApiClient({
     region: env.AWS_REGION ?? 'ap-northeast-1',
     credentials,
